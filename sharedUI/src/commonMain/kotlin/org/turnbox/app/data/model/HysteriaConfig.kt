@@ -14,10 +14,11 @@ data class HysteriaConfig(
     val sni: String = "",
     val insecure: Boolean = true
 ) {
-    
+
     fun getFullConfig(turn: TurnConfig): String {
         val effectiveServer = if (turn.enabled) turn.listen else server
-        val mapper = mapOf(SERVER_ADDRESS_PLACEHOLDER to effectiveServer, PASSWORD_PLACEHOLDER to password)
+        val mapper =
+            mapOf(SERVER_ADDRESS_PLACEHOLDER to effectiveServer, PASSWORD_PLACEHOLDER to password)
         var resultingConf = HYSTERIA_CONFIG_TEXT_DATA
         for (m in mapper) {
             resultingConf = resultingConf.replace(m.key, m.value)
@@ -29,7 +30,7 @@ data class HysteriaConfig(
     /**
      * Генерирует структурированный JSON конфиг для обмена (Copy/Paste)
      */
-    fun toJsonConfig(turn: TurnConfig): String {
+    fun toJsonConfig(turn: TurnConfig, turnType: String = "custom"): String {
         val json = Json { prettyPrint = true }
         val root = buildJsonObject {
             put("version", 1)
@@ -41,6 +42,7 @@ data class HysteriaConfig(
                 put("insecure", insecure)
             }
             putJsonObject("turn") {
+                put("type", turnType)
                 put("enabled", turn.enabled)
                 put("peer", turn.peer)
                 put("link", turn.link)
@@ -76,8 +78,8 @@ auth: $PASSWORD_PLACEHOLDER
 $SNI_PLACEHOLDER
 
 bandwidth:
-  up: 20 mbps
-  down: 20 mbps
+  up: 100 mbps
+  down: 100 mbps
 
 socks5:
   listen: 127.0.0.1:1080

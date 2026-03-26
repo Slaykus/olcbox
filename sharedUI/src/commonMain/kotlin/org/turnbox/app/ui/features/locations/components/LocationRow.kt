@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.turnbox.app.ui.features.locations.LocationItem
 import org.turnbox.app.ui.theme.shimmerEffect
+import org.turnbox.app.util.parseEmojiAndName
 
 @Composable
 fun LocationRow(
@@ -46,6 +47,7 @@ fun LocationRow(
         if (isSelected) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant
     val textColor = MaterialTheme.colorScheme.onSecondaryContainer
 
+    val (emoji, cleanName) = parseEmojiAndName(location.fullName)
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -58,12 +60,13 @@ fun LocationRow(
             .clickable(onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 8.dp)
     ) {
-        Text(text = location.flagEmoji, fontSize = 20.sp)
-
-        Spacer(modifier = Modifier.width(16.dp))
+        if (emoji.isNotEmpty()) {
+            Text(text = emoji, fontSize = 20.sp)
+            Spacer(modifier = Modifier.width(8.dp))
+        }
 
         Text(
-            text = location.name,
+            text = cleanName,
             color = textColor,
             fontSize = 16.sp,
             fontWeight = FontWeight.Medium,

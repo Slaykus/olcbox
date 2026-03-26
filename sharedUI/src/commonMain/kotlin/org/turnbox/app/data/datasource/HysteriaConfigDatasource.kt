@@ -30,6 +30,7 @@ private data class ImportWrapper(
 @Serializable
 private data class HysteriaSection(
     val server: String = "",
+    val name: String = "",
     val password: String = "",
     val sni: String = "",
     val insecure: Boolean = true
@@ -37,6 +38,7 @@ private data class HysteriaSection(
 
 @Serializable
 private data class TurnSection(
+    val type: String = "custom",
     val enabled: Boolean = false,
     val peer: String = "",
     val link: String = "",
@@ -82,6 +84,7 @@ class HysteriaConfigRepositoryImpl(
                 if (wrapper.hysteria != null || wrapper.turn != null) {
                     val hConfig = HysteriaConfig(
                         server = wrapper.hysteria?.server ?: "",
+                        name = wrapper.hysteria?.name ?: "",
                         password = wrapper.hysteria?.password ?: "",
                         sni = wrapper.hysteria?.sni ?: "",
                         insecure = wrapper.hysteria?.insecure ?: true
@@ -98,12 +101,16 @@ class HysteriaConfigRepositoryImpl(
                         listen = wrapper.turn?.listen ?: "127.0.0.1:9000"
                     )
                     
-                    val newId = "Imported_${hConfig.server.take(10)}"
+                    val turnType = wrapper.turn?.type ?: "custom"
+                    
+                    val baseId = if (hConfig.name.isNotBlank()) hConfig.name else hConfig.server.take(10)
+                    val newId = "Imported_$baseId"
+                    
                     dataSource.saveHysteriaConfig(hConfig, newId)
                     dataSource.setSelectedHysteriaId(newId)
                     
-                    dataSource.saveTurnConfig(tConfig, "custom")
-                    dataSource.setSelectedTurnType("custom")
+                    dataSource.saveTurnConfig(tConfig, turnType)
+                    dataSource.setSelectedTurnType(turnType)
                     return
                 }
             } catch (e: Exception) {

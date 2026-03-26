@@ -27,7 +27,6 @@ class AndroidConfigImporter(private val context: Context) : ConfigImporter {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = ClipData.newPlainText("Hysteria2 Config", text)
         clipboard.setPrimaryClip(clip)
-        // Визуальное подтверждение, иначе кажется что ничего не произошло
         Toast.makeText(context, "Config copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 

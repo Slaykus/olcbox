@@ -67,6 +67,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.ktor.client.okhttp)
             implementation(libs.kstore.file)
+            implementation(files("../androidApp/jniLibs/arm64-v8a/tun2socks.aar"))
         }
 
         jvmMain.dependencies {

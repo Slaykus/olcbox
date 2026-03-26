@@ -29,12 +29,14 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import org.turnbox.app.ui.components.PingButton
 import org.turnbox.app.ui.features.home.HomeScreenViewModel
 
@@ -44,9 +46,15 @@ fun CustomTurnSheet(
     onDismiss: () -> Unit,
     viewModel: HomeScreenViewModel
 ) {
-    val sheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true
-    )
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+
+    val closeSheet = {
+        scope.launch {
+            sheetState.hide()
+            onDismiss()
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -55,7 +63,7 @@ fun CustomTurnSheet(
     ) {
         CustomTurnContent(
             viewModel = viewModel,
-            onDismiss = onDismiss
+            onDismiss = { closeSheet() }
         )
     }
 }

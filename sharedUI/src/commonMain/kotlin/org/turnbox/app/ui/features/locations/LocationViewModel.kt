@@ -13,8 +13,7 @@ import org.turnbox.app.data.repository.HysteriaConfigRepository
 
 data class LocationItem(
     val id: String,
-    val name: String,
-    val flagEmoji: String,
+    val fullName: String,
     val config: HysteriaConfig? = null
 )
 
@@ -38,10 +37,21 @@ class LocationViewModel(
     var pingsState by mutableStateOf<PingsState>(PingsState.Idle)
         private set
 
-    // For editing
     var editingConfig by mutableStateOf(HysteriaConfig())
     var editingName by mutableStateOf("")
     var editingId by mutableStateOf<String?>(null)
+
+    var nameError by mutableStateOf<String?>(null)
+        private set
+
+    var serverError by mutableStateOf<String?>(null)
+        private set
+
+
+    val isFormValid: Boolean
+        get() = nameError == null && serverError == null &&
+                editingName.isNotBlank() && editingConfig.server.isNotBlank()
+
 
     init {
         loadLocations()
@@ -55,8 +65,8 @@ class LocationViewModel(
             locations.clear()
 
             savedConfigs.forEach { (id, config) ->
-                val displayName = config.name.ifBlank { config.server }
-                locations.add(LocationItem(id, displayName, "📍", config))
+                val fullName = config.name.ifBlank { config.server }
+                locations.add(LocationItem(id, fullName, config))
             }
 
             if (locations.isNotEmpty() && (currentSelectedId.isBlank() || locations.none { it.id == currentSelectedId })) {
@@ -92,6 +102,9 @@ class LocationViewModel(
     }
 
     fun startEditing(id: String?) {
+        nameError = null
+        serverError = null
+
         if (id == null) {
             editingId = null
             editingConfig = HysteriaConfig()
@@ -100,16 +113,19 @@ class LocationViewModel(
             val location = locations.find { it.id == id }
             editingId = id
             editingConfig = location?.config ?: HysteriaConfig()
-            editingName = location?.name ?: ""
+            editingName = location?.fullName ?: ""
         }
     }
 
+
     fun onNameChanged(value: String) {
         editingName = value
+        validateName(value)
     }
 
     fun onServerChanged(value: String) {
         editingConfig = editingConfig.copy(server = value)
+        validateServer(value)
     }
 
     fun onSniChanged(value: String) {
@@ -120,7 +136,39 @@ class LocationViewModel(
         editingConfig = editingConfig.copy(password = value)
     }
 
+
+    private fun validateName(name: String) {
+        nameError = when {
+            name.isBlank() -> "Name cannot be empty"
+            name.length > 30 -> "Name is too long (max 30 chars)"
+            else -> null
+        }
+    }
+
+    private fun validateServer(server: String) {
+        val serverRegex = "^[a-zA-Z0-9.-]+:\\d{1,5}\$".toRegex()
+
+        serverError = when {
+            server.isBlank() -> "Server address cannot be empty"
+            !server.contains(":") -> "Missing port (e.g., :56000)"
+            !server.matches(serverRegex) -> "Invalid server format"
+            else -> {
+                val port = server.substringAfterLast(":").toIntOrNull()
+                if (port == null || port !in 1..65535) {
+                    "Port must be between 1 and 65535"
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
     fun saveEditing(onComplete: () -> Unit) {
+        validateName(editingName)
+        validateServer(editingConfig.server)
+
+        if (!isFormValid) return
+
         viewModelScope.launch {
             val id = editingId ?: "custom_${(100..999).random()}"
             val finalConfig = editingConfig.copy(name = editingName)

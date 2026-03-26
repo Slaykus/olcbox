@@ -48,7 +48,7 @@ class HomeScreenViewModel(
             }
         }
     }
-    
+
     fun loadCurrentConfig() {
         viewModelScope.launch {
             val selectedId = configRepo.getSelectedHysteriaId()
@@ -56,14 +56,14 @@ class HomeScreenViewModel(
                 _state.update { it.copy(selectedLocation = null) }
                 return@launch
             }
-            
+
             val savedHysteria = configRepo.loadHysteriaConfig(selectedId)
             val selectedType = configRepo.getSelectedTurnType()
             val savedTurn = configRepo.loadTurnConfig(selectedType)
-            
-            val displayName = savedHysteria.name.ifBlank { savedHysteria.server }
-            val locationItem = LocationItem(selectedId, displayName, "📍", savedHysteria)
-            
+
+            val fullName = savedHysteria.name.ifBlank { savedHysteria.server }
+            val locationItem = LocationItem(selectedId, fullName, savedHysteria)
+
             _state.update {
                 it.copy(
                     configData = savedHysteria,
@@ -165,7 +165,8 @@ class HomeScreenViewModel(
     }
 
     fun onCopyFullConfigClicked() {
-        val fullData = state.value.configData.toJsonConfig(state.value.turnData)
+        val fullData =
+            state.value.configData.toJsonConfig(state.value.turnData, state.value.selectedTurnType)
         configImporter.copyToClipboard(fullData)
     }
 
