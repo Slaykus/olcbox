@@ -31,7 +31,7 @@
         </activity>
 
         <activity
-            android:name="us.leaf3stones.hy2droid.proxy.CaptchaActivity"
+            android:name="org.turnbox.app.vpn.service.CaptchaActivity"
             android:theme="@android:style/Theme.DeviceDefault.Light.Dialog"
             android:excludeFromRecents="true"
             android:exported="false" />
@@ -46,7 +46,7 @@
         </receiver>
 
         <service
-            android:name="us.leaf3stones.hy2droid.proxy.Hysteria2VpnService"
+            android:name="org.turnbox.app.vpn.service.TurnboxVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="false"
             android:foregroundServiceType="specialUse">

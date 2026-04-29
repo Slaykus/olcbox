@@ -37,7 +37,12 @@ fun HomeScreen(
     locationViewModel: LocationViewModel,
     onToggleClick: () -> Unit = { viewModel.ToggleVpn() },
     onImportFileRequested: () -> Unit = {},
-    onImportFromClipboardRequested: () -> Unit = { viewModel.onPasteFromClipboard() },
+    onImportFromClipboardRequested: () -> Unit = {
+        viewModel.onPasteFromClipboard {
+            locationViewModel.loadLocations()
+            viewModel.loadCurrentConfig()
+        }
+    },
     onCopyConfigRequested: () -> Unit = { viewModel.onCopyFullConfigClicked() }
 ) {
     val scrollState = rememberScrollState()
@@ -82,6 +87,7 @@ fun HomeScreen(
             StartButton(
                 isActive = state.isVpnConnected,
                 isLoading = state.isVpnLoading,
+                enabled = state.isVpnConnected || state.canStartVpn,
                 onClick = { onToggleClick() }
             )
             Spacer(

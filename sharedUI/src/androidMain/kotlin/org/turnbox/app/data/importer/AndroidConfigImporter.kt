@@ -25,7 +25,7 @@ class AndroidConfigImporter(private val context: Context) : ConfigImporter {
 
     override fun copyToClipboard(text: String) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("Hysteria2 Config", text)
+        val clip = ClipData.newPlainText("Turnbox Locations", text)
         clipboard.setPrimaryClip(clip)
         Toast.makeText(context, "Config copied to clipboard", Toast.LENGTH_SHORT).show()
     }

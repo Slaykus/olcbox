@@ -31,7 +31,10 @@ fun AndroidMainScreen(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            viewModel.onFileSelected(it)
+            viewModel.onFileSelected(it) {
+                locationViewModel.loadLocations()
+                viewModel.loadCurrentConfig()
+            }
         }
     }
 
@@ -50,7 +53,10 @@ fun AndroidMainScreen(
             filePickerLauncher.launch("*/*")
         },
         onImportFromClipboardRequested = {
-            viewModel.onPasteFromClipboard()
+            viewModel.onPasteFromClipboard {
+                locationViewModel.loadLocations()
+                viewModel.loadCurrentConfig()
+            }
         },
         onCopyConfigRequested = {
             viewModel.onCopyFullConfigClicked()

@@ -7,73 +7,75 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.turnbox.app.data.importer.ConfigImporter
-import org.turnbox.app.data.model.HysteriaConfig
-import org.turnbox.app.data.model.ProviderConfig
-import org.turnbox.app.data.model.TurnConfig
-import org.turnbox.app.data.repository.HysteriaConfigRepository
+import org.turnbox.app.data.model.LocationConfig
+import org.turnbox.app.data.repository.LocationsRepository
 import org.turnbox.app.ui.features.locations.LocationItem
 import org.turnbox.app.vpn.VpnManager
+import org.turnbox.app.vpn.VpnStatus
 
 class HomeScreenViewModel(
     private val vpnManager: VpnManager,
-    private val configRepo: HysteriaConfigRepository,
+    private val locationsRepository: LocationsRepository,
     private val configImporter: ConfigImporter
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
-        UiState(
+        HomeScreenState(
             isVpnConnected = false,
             isVpnLoading = false,
             selectedLocation = null,
-            configData = HysteriaConfig(),
-            turnData = TurnConfig(),
-            selectedTurnType = HysteriaConfig.DEFAULT_BYPASS_PROVIDER,
+            configData = LocationConfig(),
             shouldShowConfigInvalidReminder = false,
-            providers = emptyList()
+            canStartVpn = false,
+            startBlockedReason = "Add a location first"
         )
     )
     val state get() = _state.asStateFlow()
     val logs get() = vpnManager.logs
 
     init {
-        loadProviders()
         loadCurrentConfig()
 
         viewModelScope.launch {
-            vpnManager.isConnected.collect { connected ->
-                _state.update { it.copy(isVpnConnected = connected, isVpnLoading = false) }
+            vpnManager.status.collect { status ->
+                _state.update {
+                    when (status) {
+                        VpnStatus.Connected -> it.copy(isVpnConnected = true, isVpnLoading = false)
+                        VpnStatus.Connecting -> it.copy(isVpnConnected = false, isVpnLoading = true)
+                        VpnStatus.Reconnecting -> it.copy(isVpnConnected = true, isVpnLoading = true)
+                        VpnStatus.Stopping -> it.copy(isVpnConnected = false, isVpnLoading = false)
+                        VpnStatus.Disconnected -> it.copy(isVpnConnected = false, isVpnLoading = false)
+                        is VpnStatus.Error -> it.copy(isVpnConnected = false, isVpnLoading = false)
+                    }
+                }
             }
         }
     }
 
-    private fun loadProviders() {
-        val hardcodedProviders = listOf(
-            ProviderConfig(id = 1, code = HysteriaConfig.PROVIDER_JAZZ, name = "Jazz"),
-            ProviderConfig(id = 2, code = HysteriaConfig.PROVIDER_TELEMOST, name = "Telemost"),
-            ProviderConfig(id = 3, code = HysteriaConfig.PROVIDER_WB_STREAM, name = "WB Stream")
-        )
-
-        _state.update { it.copy(providers = hardcodedProviders) }
-    }
-
     fun loadCurrentConfig() {
         viewModelScope.launch {
-            val selectedId = configRepo.getSelectedHysteriaId()
-            if (selectedId.isBlank()) {
-                _state.update { it.copy(selectedLocation = null) }
+            val active = locationsRepository.getActiveLocation()
+            if (active == null) {
+                _state.update {
+                    it.copy(
+                        selectedLocation = null,
+                        configData = LocationConfig(),
+                        canStartVpn = false,
+                        startBlockedReason = "Add a location first"
+                    )
+                }
                 return@launch
             }
 
-            val savedHysteria = configRepo.loadHysteriaConfig(selectedId)
-            val normalized = savedHysteria.normalized()
-
-            val locationItem = LocationItem(selectedId, normalized.displayName(), normalized)
+            val normalized = active.location
+            val locationItem = LocationItem(active.storageId, normalized.displayName(), normalized)
 
             _state.update {
                 it.copy(
                     configData = normalized,
-                    selectedTurnType = normalized.bypassProvider,
-                    selectedLocation = locationItem
+                    selectedLocation = locationItem,
+                    canStartVpn = normalized.isComplete(),
+                    startBlockedReason = if (normalized.isComplete()) null else "Complete active location first"
                 )
             }
         }
@@ -83,11 +85,11 @@ class HomeScreenViewModel(
         return vpnManager.ping(_state.value.configData)
     }
 
-    suspend fun performPingFor(config: HysteriaConfig): Long? {
+    suspend fun performPingFor(config: LocationConfig): Long? {
         return vpnManager.ping(config)
     }
 
-    suspend fun checkConnectionFor(config: HysteriaConfig): Long? {
+    suspend fun checkConnectionFor(config: LocationConfig): Long? {
         return vpnManager.checkConnection(config)
     }
 
@@ -104,9 +106,16 @@ class HomeScreenViewModel(
                 if (_state.value.isVpnConnected) {
                     vpnManager.stopVpn()
                 } else {
-                    val selectedId = configRepo.getSelectedHysteriaId()
-                    if (selectedId.isNotBlank()) {
-                        configRepo.saveHysteriaConfig(state.value.configData, selectedId)
+                    val active = locationsRepository.getActiveLocation()
+                    if (active == null || !active.location.isComplete()) {
+                        _state.update {
+                            it.copy(
+                                isVpnLoading = false,
+                                canStartVpn = false,
+                                startBlockedReason = "Add a valid location first"
+                            )
+                        }
+                        return@launch
                     }
                     vpnManager.startVpn()
                 }
@@ -116,56 +125,20 @@ class HomeScreenViewModel(
         }
     }
 
-    fun onServerOptionSelected(id: Int) {
-        val provider = _state.value.providers.find { it.id == id } ?: return
-        val newType = HysteriaConfig.normalizeProvider(provider.code)
-
-        viewModelScope.launch {
-            val updatedConfig = _state.value.configData.copy(bypassProvider = newType).normalized()
-            val selectedId = configRepo.getSelectedHysteriaId()
-            if (selectedId.isNotBlank()) {
-                configRepo.saveHysteriaConfig(updatedConfig, selectedId)
-            }
-
-            _state.update {
-                it.copy(
-                    selectedTurnType = newType,
-                    configData = updatedConfig,
-                    selectedLocation = it.selectedLocation?.copy(config = updatedConfig)
-                )
-            }
-        }
-    }
-
-    fun onServerChanged(value: String) = updateHysteriaConfig { it.copy(id = value) }
-    fun onPasswordChanged(value: String) = updateHysteriaConfig { it.copy(key = value) }
+    fun onServerChanged(value: String) = updateLocationConfig { it.copy(id = value) }
+    fun onPasswordChanged(value: String) = updateLocationConfig { it.copy(key = value) }
     fun onSniChanged(value: String) = Unit
 
-    fun onTurnEnabledChanged(value: Boolean) = updateTurnConfig { it.copy(enabled = value) }
-    fun onTurnPeerChanged(value: String) = updateTurnConfig { it.copy(peer = value) }
-    fun onTurnLinkChanged(value: String) = updateTurnConfig { it.copy(link = value) }
-    fun onTurnUserChanged(value: String) = updateTurnConfig { it.copy(user = value) }
-    fun onTurnPassChanged(value: String) = updateTurnConfig { it.copy(pass = value) }
-    fun onTurnUdpChanged(value: Boolean) = updateTurnConfig { it.copy(udp = value) }
-    fun onTurnThreadsChanged(threads: String) {
-        val n = threads.toIntOrNull() ?: 8
-        updateTurnConfig { it.copy(threads = n) }
-    }
-
-    private fun updateHysteriaConfig(block: (HysteriaConfig) -> HysteriaConfig) {
+    private fun updateLocationConfig(block: (LocationConfig) -> LocationConfig) {
         _state.update { it.copy(configData = block(it.configData)) }
-    }
-
-    private fun updateTurnConfig(block: (TurnConfig) -> TurnConfig) {
-        _state.update { it.copy(turnData = block(it.turnData)) }
     }
 
     fun onConfigConfirmed() {
         if (isUserConfigValid()) {
             viewModelScope.launch {
-                val selectedId = configRepo.getSelectedHysteriaId()
-                if (selectedId.isNotBlank()) {
-                    configRepo.saveHysteriaConfig(_state.value.configData, selectedId)
+                val selectedId = locationsRepository.getActiveLocationId()
+                if (!selectedId.isNullOrBlank()) {
+                    locationsRepository.saveLocation(selectedId, _state.value.configData)
                 }
             }
         } else {
@@ -178,20 +151,21 @@ class HomeScreenViewModel(
     }
 
     fun onCopyFullConfigClicked() {
-        val fullData = state.value.configData.toJsonConfig()
-        configImporter.copyToClipboard(fullData)
-    }
-
-    fun onPasteFromClipboard() {
-        configImporter.getFromClipboard()?.let { text ->
-            onImportFullConfig(text)
+        viewModelScope.launch {
+            configImporter.copyToClipboard(locationsRepository.exportBundle())
         }
     }
 
-    fun onFileSelected(fileSource: Any) {
+    fun onPasteFromClipboard(onComplete: () -> Unit = {}) {
+        configImporter.getFromClipboard()?.let { text ->
+            onImportFullConfig(text, onComplete)
+        }
+    }
+
+    fun onFileSelected(fileSource: Any, onComplete: () -> Unit = {}) {
         viewModelScope.launch {
             configImporter.readTextFromSource(fileSource)?.let { text ->
-                onImportFullConfig(text)
+                onImportFullConfig(text, onComplete)
             }
         }
     }
@@ -203,31 +177,37 @@ class HomeScreenViewModel(
     fun onRawConfigImported(rawText: String) {
         if (rawText.isBlank()) return
         viewModelScope.launch {
-            configRepo.saveRawConfig(rawText)
+            locationsRepository.importText(rawText)
             _state.update { it.copy(shouldShowConfigInvalidReminder = false) }
+            loadCurrentConfig()
         }
     }
 
-    fun onImportFullConfig(rawText: String) {
+    fun onImportFullConfig(rawText: String, onComplete: () -> Unit = {}) {
         if (rawText.isBlank()) return
         viewModelScope.launch {
             try {
-                configRepo.saveRawConfig(rawText)
+                locationsRepository.importText(rawText)
                 loadCurrentConfig()
+                onComplete()
             } catch (e: Exception) {
-                // add error to state
+                _state.update {
+                    it.copy(
+                        canStartVpn = false,
+                        startBlockedReason = e.message ?: "Import failed"
+                    )
+                }
             }
         }
     }
 }
 
-data class UiState(
+data class HomeScreenState(
     val isVpnConnected: Boolean,
     val isVpnLoading: Boolean = false,
     val selectedLocation: LocationItem?,
-    val configData: HysteriaConfig,
-    val turnData: TurnConfig,
-    val selectedTurnType: String,
+    val configData: LocationConfig,
     val shouldShowConfigInvalidReminder: Boolean,
-    val providers: List<ProviderConfig> = emptyList()
+    val canStartVpn: Boolean,
+    val startBlockedReason: String?
 )

@@ -45,7 +45,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
-import org.turnbox.app.data.model.HysteriaConfig
+import org.turnbox.app.data.model.LocationConfig
 import org.turnbox.app.ui.components.PingButton
 import org.turnbox.app.ui.features.home.HomeScreenViewModel
 
@@ -246,8 +246,8 @@ private fun BypassProviderPicker(
     enabled: Boolean,
     onProviderSelected: (String) -> Unit
 ) {
-    val selected = HysteriaConfig.normalizeProvider(selectedProvider)
-    val options = HysteriaConfig.supportedBypassProviders
+    val selected = LocationConfig.normalizeProvider(selectedProvider)
+    val options = LocationConfig.supportedBypassProviders
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -291,7 +291,7 @@ private fun BypassProviderPicker(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = HysteriaConfig.providerDisplayName(provider),
+                            text = LocationConfig.providerDisplayName(provider),
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
                             fontWeight = FontWeight.Medium,
                             fontSize = 13.sp,
@@ -315,10 +315,10 @@ private fun BypassProviderPicker(
 }
 
 private fun roomIdPlaceholder(provider: String): String {
-    return when (HysteriaConfig.normalizeProvider(provider)) {
-        HysteriaConfig.PROVIDER_TELEMOST -> "12345678901234"
-        HysteriaConfig.PROVIDER_JAZZ -> "room id or any"
-        HysteriaConfig.PROVIDER_WB_STREAM -> "019daab6-e133-7a92-a03a-83861d304d33"
+    return when (LocationConfig.normalizeProvider(provider)) {
+        LocationConfig.PROVIDER_TELEMOST -> "12345678901234"
+        LocationConfig.PROVIDER_JAZZ -> "room id or any"
+        LocationConfig.PROVIDER_WB_STREAM -> "019daab6-e133-7a92-a03a-83861d304d33"
         else -> "room id"
     }
 }

@@ -37,6 +37,7 @@ fun StartButton(
     modifier: Modifier = Modifier,
     isActive: Boolean,
     isLoading: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     val mainButtonColor by animateColorAsState(
@@ -64,7 +65,7 @@ fun StartButton(
             .padding(6.dp)
             .clip(CircleShape)
             .background(color = mainButtonColor)
-            .clickable(enabled = !isLoading) {
+            .clickable(enabled = enabled && !isLoading) {
                 onClick()
             },
         contentAlignment = Alignment.Center
@@ -84,7 +85,7 @@ fun StartButton(
             Icon(
                 imageVector = Icons.Rounded.PowerSettingsNew,
                 contentDescription = "Start Icon",
-                tint = contentColor.copy(alpha = if (isLoading) 0.5f else 1f),
+                tint = contentColor.copy(alpha = if (isLoading || !enabled) 0.5f else 1f),
                 modifier = Modifier.size(48.dp)
             )
 
@@ -94,9 +95,10 @@ fun StartButton(
                 text = when {
                     isLoading -> "WAIT..."
                     isActive -> "STOP"
+                    !enabled -> "SETUP"
                     else -> "START"
                 },
-                color = contentColor,
+                color = contentColor.copy(alpha = if (!enabled) 0.7f else 1f),
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Medium
             )

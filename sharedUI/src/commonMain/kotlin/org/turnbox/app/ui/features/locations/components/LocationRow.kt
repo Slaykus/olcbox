@@ -28,7 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.turnbox.app.data.model.HysteriaConfig
+import org.turnbox.app.data.model.LocationConfig
 import org.turnbox.app.ui.features.locations.LocationItem
 import org.turnbox.app.util.parseEmojiAndName
 
@@ -76,7 +76,7 @@ fun LocationRow(
             )
 
             val providerName = location.config?.providerName()
-                ?: HysteriaConfig.providerDisplayName(HysteriaConfig.DEFAULT_BYPASS_PROVIDER)
+                ?: LocationConfig.providerDisplayName(LocationConfig.DEFAULT_BYPASS_PROVIDER)
             val roomId = location.config?.id.orEmpty()
             Text(
                 text = if (roomId.isBlank()) providerName else "$providerName · $roomId",

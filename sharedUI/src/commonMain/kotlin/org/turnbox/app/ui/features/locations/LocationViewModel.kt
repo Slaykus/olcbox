@@ -10,13 +10,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.turnbox.app.data.model.HysteriaConfig
-import org.turnbox.app.data.repository.HysteriaConfigRepository
+import org.turnbox.app.data.model.LocationConfig
+import org.turnbox.app.data.repository.LocationsRepository
 
 data class LocationItem(
-    val id: String,
+    val storageId: String,
     val fullName: String,
-    val config: HysteriaConfig? = null
+    val config: LocationConfig? = null
 )
 
 sealed class PingsState {
@@ -27,7 +27,7 @@ sealed class PingsState {
 }
 
 class LocationViewModel(
-    private val configRepo: HysteriaConfigRepository,
+    private val locationsRepository: LocationsRepository,
 ) : ViewModel() {
 
     var locations = mutableStateListOf<LocationItem>()
@@ -39,7 +39,7 @@ class LocationViewModel(
     var pingsState by mutableStateOf<PingsState>(PingsState.Idle)
         private set
 
-    var editingConfig by mutableStateOf(HysteriaConfig())
+    var editingConfig by mutableStateOf(LocationConfig())
     var editingName by mutableStateOf("")
     var editingId by mutableStateOf<String?>(null)
 
@@ -68,44 +68,44 @@ class LocationViewModel(
 
     fun loadLocations() {
         viewModelScope.launch {
-            val savedConfigs = configRepo.getAllHysteriaConfigs()
-            val currentSelectedId = configRepo.getSelectedHysteriaId()
+            val savedConfigs = locationsRepository.getAllLocations()
+            val currentSelectedId = locationsRepository.getActiveLocationId()
 
             locations.clear()
 
-            savedConfigs.forEach { (id, config) ->
-                val normalized = config.normalized()
-                locations.add(LocationItem(id, normalized.displayName(), normalized))
+            savedConfigs.forEach { entry ->
+                val normalized = entry.location
+                locations.add(LocationItem(entry.storageId, normalized.displayName(), normalized))
             }
 
-            if (locations.isNotEmpty() && (currentSelectedId.isBlank() || locations.none { it.id == currentSelectedId })) {
-                val nextId = locations.firstOrNull()?.id
-                configRepo.setSelectedHysteriaId(nextId ?: "")
+            if (locations.isNotEmpty() && (currentSelectedId.isNullOrBlank() || locations.none { it.storageId == currentSelectedId })) {
+                val nextId = locations.firstOrNull()?.storageId
+                locationsRepository.setActiveLocationId(nextId)
                 selectedLocationId = nextId
             } else {
-                selectedLocationId = currentSelectedId.ifBlank { null }
+                selectedLocationId = currentSelectedId
             }
         }
     }
 
     fun selectLocation(id: String, onComplete: () -> Unit = {}) {
         viewModelScope.launch {
-            configRepo.setSelectedHysteriaId(id)
+            locationsRepository.setActiveLocationId(id)
             selectedLocationId = id
             onComplete()
         }
     }
 
-    fun refreshPings(performPing: suspend (HysteriaConfig) -> Long?) {
+    fun refreshPings(performPing: suspend (LocationConfig) -> Long?) {
         val previousPings = (pingsState as? PingsState.Success)?.pings
         viewModelScope.launch {
             pingsState = PingsState.Loading(lastPings = previousPings)
             try {
                 val results = locations.map { location ->
                     async {
-                        val config = location.config ?: return@async location.id to null
+                        val config = location.config ?: return@async location.storageId to null
                         val result = performPing(config)
-                        location.id to result?.toInt()
+                        location.storageId to result?.toInt()
                     }
                 }.awaitAll().toMap()
 
@@ -124,12 +124,12 @@ class LocationViewModel(
 
         if (id == null) {
             editingId = null
-            editingConfig = HysteriaConfig()
+            editingConfig = LocationConfig()
             editingName = ""
         } else {
-            val location = locations.find { it.id == id }
+            val location = locations.find { it.storageId == id }
             editingId = id
-            editingConfig = location?.config?.normalized() ?: HysteriaConfig()
+            editingConfig = location?.config?.normalized() ?: LocationConfig()
             editingName = editingConfig.displayName()
         }
     }
@@ -145,9 +145,7 @@ class LocationViewModel(
         validateServer(value)
     }
 
-    fun onSniChanged(value: String) {
-        // Kept for compatibility with older callers. olcRTC locations no longer use SNI.
-    }
+    fun onSniChanged(value: String) = Unit
 
     fun onPasswordChanged(value: String) {
         editingConfig = editingConfig.copy(key = value)
@@ -156,7 +154,7 @@ class LocationViewModel(
 
     fun onBypassProviderChanged(value: String) {
         editingConfig = editingConfig.copy(
-            bypassProvider = HysteriaConfig.normalizeProvider(value)
+            bypassProvider = LocationConfig.normalizeProvider(value)
         )
     }
 
@@ -196,8 +194,8 @@ class LocationViewModel(
             isSaving = true
             val id = editingId ?: "custom_${(100..999).random()}"
             val finalConfig = editingConfig.copy(name = editingName).normalized()
-            configRepo.saveHysteriaConfig(finalConfig, id)
-            configRepo.setSelectedHysteriaId(id)
+            locationsRepository.saveLocation(id, finalConfig)
+            locationsRepository.setActiveLocationId(id)
             loadLocations()
             delay(600)
             onComplete()
@@ -207,7 +205,7 @@ class LocationViewModel(
 
     fun deleteLocation(id: String, onComplete: () -> Unit = {}) {
         viewModelScope.launch {
-            configRepo.deleteHysteriaConfig(id)
+            locationsRepository.deleteLocation(id)
             loadLocations()
             onComplete()
         }

@@ -1,14 +1,24 @@
 package org.turnbox.app.vpn
 
 import kotlinx.coroutines.flow.StateFlow
-import org.turnbox.app.data.model.HysteriaConfig
+import org.turnbox.app.data.model.LocationConfig
+
+sealed class VpnStatus {
+    object Disconnected : VpnStatus()
+    object Connecting : VpnStatus()
+    object Connected : VpnStatus()
+    object Reconnecting : VpnStatus()
+    object Stopping : VpnStatus()
+    data class Error(val message: String) : VpnStatus()
+}
 
 interface VpnManager {
     val logs: StateFlow<List<String>>
+    val status: StateFlow<VpnStatus>
     val isConnected: StateFlow<Boolean>
     fun needsPermission(): Boolean
     fun startVpn()
     fun stopVpn()
-    suspend fun ping(hysteriaConfig: HysteriaConfig): Long?
-    suspend fun checkConnection(hysteriaConfig: HysteriaConfig): Long?
+    suspend fun ping(locationConfig: LocationConfig): Long?
+    suspend fun checkConnection(locationConfig: LocationConfig): Long?
 }

@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-import org.turnbox.app.data.model.HysteriaConfig
+import org.turnbox.app.data.model.LocationConfig
 import org.turnbox.app.ui.features.home.HomeScreenViewModel
 
 sealed class PingState {
@@ -48,7 +48,7 @@ sealed class PingState {
 fun PingButton(
     modifier: Modifier = Modifier,
     homeViewModel: HomeScreenViewModel,
-    configGetter: () -> HysteriaConfig? = { null }
+    configGetter: () -> LocationConfig? = { null }
 ) {
     var pingState by remember { mutableStateOf<PingState>(PingState.Idle) }
 

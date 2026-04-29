@@ -1,3 +1,3 @@
--keep class us.leaf3stones.hy2droid.proxy.Hysteria2VpnService {
+-keep class org.turnbox.app.vpn.service.TurnboxVpnService {
     *;
 }

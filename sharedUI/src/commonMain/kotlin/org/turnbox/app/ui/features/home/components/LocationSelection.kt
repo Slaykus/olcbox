@@ -92,18 +92,18 @@ fun LocationSelectorScreen(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 locations.forEach { location ->
-                    val pingMs = (pingsState as? PingsState.Success)?.pings?.get(location.id)
-                        ?: (pingsState as? PingsState.Loading)?.lastPings?.get(location.id)
+                    val pingMs = (pingsState as? PingsState.Success)?.pings?.get(location.storageId)
+                        ?: (pingsState as? PingsState.Loading)?.lastPings?.get(location.storageId)
                     val isOffline = pingsState is PingsState.Success && pingMs == null
 
                     LocationRow(
                         location = location,
-                        isSelected = selectedLocationId == location.id,
+                        isSelected = selectedLocationId == location.storageId,
                         isLoading = pingsState is PingsState.Loading,
                         isError = isOffline,
                         pingMs = pingMs,
-                        onSettingsClick = { onLocationSettingsClick(location.id) },
-                        onClick = { onLocationSelected(location.id) }
+                        onSettingsClick = { onLocationSettingsClick(location.storageId) },
+                        onClick = { onLocationSelected(location.storageId) }
                     )
                 }
             }

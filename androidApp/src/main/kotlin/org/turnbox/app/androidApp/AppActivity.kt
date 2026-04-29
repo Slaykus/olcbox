@@ -7,8 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import org.turnbox.app.data.datasource.HysteriaConfigDataSourceImpl
-import org.turnbox.app.data.datasource.HysteriaConfigRepositoryImpl
+import org.turnbox.app.data.datasource.LocationsDataSourceImpl
+import org.turnbox.app.data.datasource.LocationsRepositoryImpl
 import org.turnbox.app.data.importer.AndroidConfigImporter
 import org.turnbox.app.ui.activities.AndroidMainScreen
 import org.turnbox.app.ui.features.home.HomeScreenViewModel
@@ -33,18 +33,18 @@ class AppActivity : ComponentActivity() {
         }
 
         val vpnManager = AndroidVpnManager(this)
-        val configDataSource = HysteriaConfigDataSourceImpl(this)
-        val configRepository = HysteriaConfigRepositoryImpl(configDataSource)
+        val locationsDataSource = LocationsDataSourceImpl(this)
+        val locationsRepository = LocationsRepositoryImpl(locationsDataSource)
         val configImporter = AndroidConfigImporter(this)
 
         val viewModel = HomeScreenViewModel(
             vpnManager = vpnManager,
-            configRepo = configRepository,
+            locationsRepository = locationsRepository,
             configImporter = configImporter
         )
         
         val locationViewModel = LocationViewModel(
-            configRepo = configRepository
+            locationsRepository = locationsRepository
         )
 
         enableEdgeToEdge()
