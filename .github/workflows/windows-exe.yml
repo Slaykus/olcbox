@@ -23,7 +23,7 @@ jobs:
       - name: Clone olcrtc fork
         shell: pwsh
         run: |
-          git clone https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
+          git clone --branch transport/videochannel --single-branch https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
 
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -71,7 +71,7 @@ jobs:
 
       - name: Clone olcrtc fork
         run: |
-          git clone https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
+          git clone --branch transport/videochannel --single-branch https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
 
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -115,7 +115,7 @@ jobs:
 
       - name: Clone olcrtc fork
         run: |
-          git clone https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
+          git clone --branch transport/videochannel --single-branch https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
 
       - name: Install Linux packaging deps
         run: |
@@ -171,7 +171,7 @@ jobs:
 
       - name: Clone olcrtc fork
         run: |
-          git clone https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
+          git clone --branch transport/videochannel --single-branch https://codeberg.org/gothex/olcrtc-for-olcbox.git olcrtc
 
       - name: Setup JDK
         uses: actions/setup-java@v4
