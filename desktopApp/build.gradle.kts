@@ -251,7 +251,7 @@ if (currentBuildOs.isLinux) {
         )
     }
 
-    tasks.named("packageReleaseDistributionForCurrentOS") {
+    tasks.matching { it.name == "packageReleaseDistributionForCurrentOS" }.configureEach {
         dependsOn(packageReleaseLinuxAppImage)
     }
 }

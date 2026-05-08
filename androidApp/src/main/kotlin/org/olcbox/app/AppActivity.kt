@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import org.olcbox.app.data.datasource.LocationsDataSourceImpl
 import org.olcbox.app.data.datasource.LocationsRepositoryImpl
 import org.olcbox.app.data.exporter.AndroidLogExporter
@@ -52,13 +54,15 @@ class AppActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            AppTheme({ 
+            val dynamicThemeEnabled by vpnManager.dynamicThemeEnabled.collectAsState()
+
+            AppTheme(useDynamicColor = dynamicThemeEnabled) {
                 AndroidMainScreen(
                     viewModel = viewModel,
                     locationViewModel = locationViewModel,
                     vpnManager = vpnManager
-                ) 
-            })
+                )
+            }
         }
     }
 }

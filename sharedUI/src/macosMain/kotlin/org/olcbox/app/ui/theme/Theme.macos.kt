@@ -3,28 +3,15 @@ package org.olcbox.app.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-)
-
 @Composable
 actual fun AppTheme(
+    useDynamicColor: Boolean,
     content: @Composable () -> Unit
 ) {
     val systemIsDark = isSystemInDarkTheme()
@@ -36,7 +23,7 @@ actual fun AppTheme(
     ) {
         val isDark by isDarkState
         MaterialTheme(
-            colorScheme = if (isDark) DarkColorScheme else LightColorScheme,
+            colorScheme = if (isDark) OlcboxDarkColorScheme else OlcboxLightColorScheme,
             typography = typography
         ) {
             ProvideTextStyle(MaterialTheme.typography.bodyMedium, content)

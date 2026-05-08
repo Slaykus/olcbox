@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.olcbox.app.data.model.LocationConfig
 import org.olcbox.app.vpn.data.KEY_ANDROID_CONNECTION_MODE
+import org.olcbox.app.vpn.data.KEY_ANDROID_DYNAMIC_THEME
 import org.olcbox.app.vpn.data.KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS
 import org.olcbox.app.vpn.data.KEY_ANDROID_SPLIT_TUNNEL_MODE
 import org.olcbox.app.vpn.data.KEY_ANDROID_SPLIT_TUNNEL_PROXY_APPS
@@ -36,6 +37,7 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
     private val _connectionMode = MutableStateFlow(AndroidConnectionMode.Tun)
     private val _proxySettings = MutableStateFlow(AndroidSocksProxySettings())
     private val _splitTunnelSettings = MutableStateFlow(AndroidSplitTunnelSettings())
+    private val _dynamicThemeEnabled = MutableStateFlow(true)
     private val _installedApps = MutableStateFlow<List<AndroidInstalledApp>>(emptyList())
 
     override val logs: StateFlow<List<String>> = OlcboxVpnState.logs
@@ -44,6 +46,7 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
     val connectionMode: StateFlow<AndroidConnectionMode> = _connectionMode.asStateFlow()
     val proxySettings: StateFlow<AndroidSocksProxySettings> = _proxySettings.asStateFlow()
     val splitTunnelSettings: StateFlow<AndroidSplitTunnelSettings> = _splitTunnelSettings.asStateFlow()
+    val dynamicThemeEnabled: StateFlow<Boolean> = _dynamicThemeEnabled.asStateFlow()
     val installedApps: StateFlow<List<AndroidInstalledApp>> = _installedApps.asStateFlow()
 
     init {
@@ -66,12 +69,18 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
                         proxyPackages = preferences[KEY_ANDROID_SPLIT_TUNNEL_PROXY_APPS].orEmpty(),
                         bypassPackages = preferences[KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS].orEmpty()
                     )
-                    Triple(mode, proxy, splitTunnel)
+                    AndroidAppPreferences(
+                        mode = mode,
+                        proxy = proxy,
+                        splitTunnel = splitTunnel,
+                        dynamicThemeEnabled = preferences[KEY_ANDROID_DYNAMIC_THEME] != false
+                    )
                 }
-                .collect { (mode, proxy, splitTunnel) ->
-                    _connectionMode.value = mode
-                    _proxySettings.value = proxy
-                    _splitTunnelSettings.value = splitTunnel
+                .collect { settings ->
+                    _connectionMode.value = settings.mode
+                    _proxySettings.value = settings.proxy
+                    _splitTunnelSettings.value = settings.splitTunnel
+                    _dynamicThemeEnabled.value = settings.dynamicThemeEnabled
                 }
         }
         refreshInstalledApps()
@@ -88,6 +97,15 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
         scope.launch {
             appContext.vpnPrefDataStore.edit { preferences ->
                 preferences[KEY_ANDROID_CONNECTION_MODE] = mode.value
+            }
+        }
+    }
+
+    fun setDynamicThemeEnabled(enabled: Boolean) {
+        _dynamicThemeEnabled.value = enabled
+        scope.launch {
+            appContext.vpnPrefDataStore.edit { preferences ->
+                preferences[KEY_ANDROID_DYNAMIC_THEME] = enabled
             }
         }
     }
@@ -263,6 +281,13 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
     private fun Set<String>.toggle(value: String): Set<String> {
         return if (value in this) this - value else this + value
     }
+
+    private data class AndroidAppPreferences(
+        val mode: AndroidConnectionMode,
+        val proxy: AndroidSocksProxySettings,
+        val splitTunnel: AndroidSplitTunnelSettings,
+        val dynamicThemeEnabled: Boolean
+    )
 
     private companion object {
         const val LEGACY_DEFAULT_USERNAME = "olcbox"

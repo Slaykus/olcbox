@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
@@ -61,6 +62,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -101,11 +103,13 @@ internal fun AppSettingsSheet(
     splitTunnelSettings: AndroidSplitTunnelSettings,
     installedApps: List<AndroidInstalledApp>,
     logs: List<String>,
+    dynamicThemeEnabled: Boolean,
     enabled: Boolean,
     isConnectionActive: Boolean,
     onDismiss: () -> Unit,
     onCopyConfigClick: () -> Unit,
     onSaveLogsClick: () -> Unit,
+    onDynamicThemeChanged: (Boolean) -> Unit,
     onModeSelected: (AndroidConnectionMode) -> Unit,
     onProxySettingsSaved: (String, String, Int) -> Unit,
     onProxyPasswordRegenerated: () -> Unit,
@@ -182,7 +186,9 @@ internal fun AppSettingsSheet(
                     selectedMode = selectedMode,
                     proxySettings = proxySettings,
                     splitTunnelSettings = splitTunnelSettings,
+                    dynamicThemeEnabled = dynamicThemeEnabled,
                     enabled = enabled,
+                    onDynamicThemeChanged = onDynamicThemeChanged,
                     onConnectionModeClick = { route = AppSettingsRoute.ConnectionMode },
                     onProxySettingsClick = { route = AppSettingsRoute.SocksProxy },
                     onSplitTunnelingClick = { route = AppSettingsRoute.SplitTunneling },
@@ -240,7 +246,9 @@ private fun AppSettingsHubContent(
     selectedMode: AndroidConnectionMode,
     proxySettings: AndroidSocksProxySettings,
     splitTunnelSettings: AndroidSplitTunnelSettings,
+    dynamicThemeEnabled: Boolean,
     enabled: Boolean,
+    onDynamicThemeChanged: (Boolean) -> Unit,
     onConnectionModeClick: () -> Unit,
     onProxySettingsClick: () -> Unit,
     onSplitTunnelingClick: () -> Unit,
@@ -262,6 +270,18 @@ private fun AppSettingsHubContent(
         Spacer(Modifier.height(20.dp))
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SettingsSwitchRow(
+                title = "Dynamic Theme",
+                value = if (dynamicThemeEnabled) {
+                    "Using Android system colors"
+                } else {
+                    "Using Olcbox colors"
+                },
+                icon = Icons.Outlined.Palette,
+                checked = dynamicThemeEnabled,
+                enabled = true,
+                onCheckedChange = onDynamicThemeChanged
+            )
             SettingsNavigationRow(
                 title = "Connection Mode",
                 value = selectedMode.settingsSummary(),
@@ -669,6 +689,71 @@ private fun SettingsNavigationRow(
                     modifier = Modifier.size(24.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    title: String,
+    value: String,
+    icon: ImageVector,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(enabled = enabled) { onCheckedChange(!checked) },
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
+
+            Spacer(Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = value,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Switch(
+                checked = checked,
+                enabled = enabled,
+                onCheckedChange = onCheckedChange
+            )
         }
     }
 }
