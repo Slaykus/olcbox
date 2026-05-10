@@ -82,5 +82,5 @@ internal object OlcRtcConnectionChecker {
 
     private const val HTTP_PING_ATTEMPTS = 1
     private const val HTTP_PING_TIMEOUT_MS = 8_000L
-    private const val HTTP_PING_URL = "https://ya.ru/"
+    private const val HTTP_PING_URL = "https://www.google.com/generate_204"
 }
