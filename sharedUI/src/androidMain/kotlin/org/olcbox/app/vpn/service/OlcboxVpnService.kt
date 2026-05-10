@@ -92,8 +92,6 @@ class OlcboxVpnService : VpnService() {
     private lateinit var connectivityManager: ConnectivityManager
     private var currentNetwork: Network? = null
     private var isCallbackRegistered = false
-    private var localSocksPort = LOCAL_SOCKS_PORT_BASE
-    private var nextSocksPort = LOCAL_SOCKS_PORT_BASE
     private var connectionMode = AndroidConnectionMode.Tun
     private var socksListenPort = AndroidSocksProxySettings.DEFAULT_PORT
     private var socksUsername = ""
@@ -396,16 +394,6 @@ class OlcboxVpnService : VpnService() {
         coroutineContext.ensureActive()
         if (requestedGeneration != generation) return
 
-        val socksPort = chooseAvailableSocksPort(
-            reservedPort = socksListenPort.takeIf { connectionMode == AndroidConnectionMode.Proxy }
-        )
-        if (socksPort == null) {
-            setStatus(VpnStatus.Error("No free local SOCKS port"))
-            updateNotification("Connection failed")
-            return
-        }
-        localSocksPort = socksPort
-
         val upstream = findActiveUpstreamNetwork()
         if (upstream == null) {
             updateUnderlyingNetwork(null)
@@ -430,10 +418,10 @@ class OlcboxVpnService : VpnService() {
         if (requestedGeneration != generation) return
 
         if (connectionMode == AndroidConnectionMode.Proxy) {
-            if (!startAuthenticatedSocksProxy()) {
-                stopTransportProcesses(closeTun = true)
-                return
-            }
+//            if (!startAuthenticatedSocksProxy()) {
+//                stopTransportProcesses(closeTun = true)
+//                return
+//            }
             setStatus(VpnStatus.Connected)
             recoveryRequestedForGeneration = 0L
             updateNotification(connectedNotificationText())
@@ -476,10 +464,11 @@ class OlcboxVpnService : VpnService() {
         val config = location.normalized()
         return try {
             installMobileCallbacks()
-            val socksPort = localSocksPort
-            waitForSocksPortReleased(socksPort, SOCKS_RELEASE_QUICK_TIMEOUT_MS)
-            if (isLocalSocksPortOpen(socksPort)) {
-                throw IllegalStateException("SOCKS port $socksPort is still in use")
+            val targetSocksPort = socksListenPort
+
+            waitForSocksPortReleased(targetSocksPort, SOCKS_RELEASE_QUICK_TIMEOUT_MS)
+            if (isLocalSocksPortOpen(targetSocksPort)) {
+                throw IllegalStateException("SOCKS port $targetSocksPort is still in use")
             }
             bindProcessToNetwork(upstream, "Bound to ${getNetName(upstream)}")
             configureMobileTransport(config)
@@ -493,12 +482,13 @@ class OlcboxVpnService : VpnService() {
                 config.id,
                 config.clientId,
                 config.key,
-                socksPort.toLong(),
-                "",
-                ""
+                targetSocksPort.toLong(),
+                socksUsername,
+                socksPassword
             )
             Mobile.waitReady(MOBILE_READY_TIMEOUT_MS)
-            addLog("olcRTC ready on 127.0.0.1:$socksPort")
+            addLog("olcRTC ready on 127.0.0.1:$targetSocksPort")
+            addLog("username: $socksUsername, password: $socksPassword")
             if (keepProcessBound) {
                 addLog("Keeping olcRTC bound to ${getNetName(upstream)}")
             }
@@ -660,6 +650,7 @@ class OlcboxVpnService : VpnService() {
 
     private fun writeTun2socksConfig(): File {
         val file = File(filesDir, TUN2SOCKS_CONFIG_FILE_NAME)
+
         file.writeText(
             """
             tunnel:
@@ -670,9 +661,11 @@ class OlcboxVpnService : VpnService() {
 
             socks5:
               address: 127.0.0.1
-              port: $localSocksPort
+              port: $socksListenPort
               udp: 'tcp'
               pipeline: false
+              username: '$socksUsername'
+              password: '$socksPassword'
 
             mapdns:
               address: $MAPDNS_ADDRESS
@@ -711,12 +704,6 @@ class OlcboxVpnService : VpnService() {
                     mode == AndroidConnectionMode.Tun && tun2socksThread?.isAlive != true -> {
                         addLog("Watchdog: tun2socks stopped")
                         requestTransportRecovery("tun2socks stopped", fullRestart = true)
-                        return@launch
-                    }
-
-                    mode == AndroidConnectionMode.Proxy && socksProxy?.isRunning != true -> {
-                        addLog("Watchdog: SOCKS proxy stopped")
-                        requestTransportRecovery("SOCKS proxy stopped", fullRestart = true)
                         return@launch
                     }
                 }
@@ -803,51 +790,19 @@ class OlcboxVpnService : VpnService() {
         runCatching { Mobile.stop() }
     }
 
-    private fun startAuthenticatedSocksProxy(): Boolean {
-        if (socksUsername.isBlank()) {
-            addLog("SOCKS proxy username is missing")
-            setStatus(VpnStatus.Error("SOCKS proxy username is missing"))
-            updateNotification("Proxy failed")
-            return false
-        }
-        if (socksPassword.isBlank()) {
-            addLog("SOCKS proxy password is missing")
-            setStatus(VpnStatus.Error("SOCKS proxy password is missing"))
-            updateNotification("Proxy failed")
-            return false
-        }
-
-        return try {
-            stopAuthenticatedSocksProxy()
-            socksProxy = AuthenticatedSocksProxy(
-                listenPort = socksListenPort,
-                backendPort = localSocksPort,
-                username = socksUsername,
-                password = socksPassword,
-                log = ::addLog
-            ).also { it.start() }
-            true
-        } catch (e: Exception) {
-            addLog("SOCKS proxy start failed: ${e.message}")
-            setStatus(VpnStatus.Error(e.message ?: "SOCKS proxy failed"))
-            updateNotification("Proxy failed")
-            false
-        }
-    }
-
     private fun stopAuthenticatedSocksProxy() {
         socksProxy?.stop()
         socksProxy = null
     }
 
     private suspend fun stopMobileAndWait() {
-        val socksPort = localSocksPort
+        val socksPort = socksListenPort
         stopMobile()
         waitForSocksPortReleased(socksPort)
     }
 
     private suspend fun waitForSocksPortReleased(
-        port: Int = localSocksPort,
+        port: Int = socksListenPort,
         timeoutMs: Long = SOCKS_RELEASE_TIMEOUT_MS
     ) {
         val deadline = System.currentTimeMillis() + timeoutMs
@@ -867,19 +822,6 @@ class OlcboxVpnService : VpnService() {
                 )
             }
         }.isSuccess
-    }
-
-    private fun chooseAvailableSocksPort(reservedPort: Int? = null): Int? {
-        repeat(LOCAL_SOCKS_PORT_MAX - LOCAL_SOCKS_PORT_BASE + 1) {
-            val candidate = nextSocksPort
-            nextSocksPort = if (candidate >= LOCAL_SOCKS_PORT_MAX) {
-                LOCAL_SOCKS_PORT_BASE
-            } else {
-                candidate + 1
-            }
-            if (candidate != reservedPort && !isLocalSocksPortOpen(candidate)) return candidate
-        }
-        return null
     }
 
     private fun handleRtcLine(line: String) {
@@ -1158,10 +1100,24 @@ class OlcboxVpnService : VpnService() {
                 val backendIn = DataInputStream(backend.getInputStream())
                 val backendOut = DataOutputStream(backend.getOutputStream())
 
-                backendOut.write(byteArrayOf(SOCKS_VERSION, 0x01, SOCKS_METHOD_NO_AUTH))
+                backendOut.write(byteArrayOf(SOCKS_VERSION, 0x01, SOCKS_METHOD_USERNAME_PASSWORD))
                 backendOut.flush()
+
                 if (backendIn.readUnsignedByte() != SOCKS_VERSION.toInt()) return
-                if (backendIn.readUnsignedByte() == SOCKS_METHOD_NO_ACCEPTABLE.toInt()) return
+                if (backendIn.readUnsignedByte() != SOCKS_METHOD_USERNAME_PASSWORD.toInt()) return
+
+                val userBytes = username.toByteArray()
+                val passBytes = password.toByteArray()
+
+                backendOut.write(SOCKS_AUTH_VERSION.toInt())
+                backendOut.write(userBytes.size)
+                backendOut.write(userBytes)
+                backendOut.write(passBytes.size)
+                backendOut.write(passBytes)
+                backendOut.flush()
+
+                if (backendIn.readUnsignedByte() != SOCKS_AUTH_VERSION.toInt()) return
+                if (backendIn.readUnsignedByte() != 0x00) return // 0x00 - успешно
 
                 val c2b = relay(client, backend, "client-to-backend")
                 val b2c = relay(backend, client, "backend-to-client")
