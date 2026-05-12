@@ -141,8 +141,12 @@ keyPassword=...
 
 Linux privilege override:
 
+Linux privilege override:
+
 ```bash
 OLCBOX_LINUX_PRIVILEGE=sudo ./gradlew :desktopApp:run
+OLCBOX_LINUX_PRIVILEGE=pkexec ./gradlew :desktopApp:run
+```
 
 ## Поддержать проект
 
@@ -165,5 +169,3 @@ OLCBOX_LINUX_PRIVILEGE=sudo ./gradlew :desktopApp:run
 Если комментарий к переводу будет другим или пустым, деньги будут возвращены.
 
 Спасибо за поддержку проекта.
-OLCBOX_LINUX_PRIVILEGE=pkexec ./gradlew :desktopApp:run
-```
