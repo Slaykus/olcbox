@@ -8,7 +8,7 @@
   <img src="docs/screenshots/photo_2026-05-05_20-40-45.jpg" alt="Olcbox split tunneling settings screen" width="200">
 </p>
 
-<p align="center">
+<p>
   <a href="#поддержать-проект">
     <img src="https://img.shields.io/badge/Поддержать-iOS%20версию-blue?style=for-the-badge&logo=apple" alt="Поддержать iOS версию">
   </a>
