@@ -75,13 +75,6 @@ jobs:
           path: olcrtc
           submodules: recursive
 
-      - name: Patch universal-carrier olcrtc Windows CLI
-        if: needs.release_version.outputs.olcrtc_ref == 'refactor/universal-carrier'
-        shell: pwsh
-        run: |
-          & "${{ github.workspace }}\olcbox\.github\scripts\patch-olcrtc-windows-cli.ps1" `
-            -OlcRtcPath "${{ github.workspace }}\olcrtc"
-
       - name: Setup JDK
         uses: actions/setup-java@v5
         with:
