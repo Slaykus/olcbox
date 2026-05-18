@@ -1,6 +1,16 @@
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.api.tasks.bundling.Zip
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.io.File
 import java.net.URI
 import java.util.zip.ZipFile
 
@@ -18,6 +28,59 @@ dependencies {
     implementation(libs.zxing.core)
 }
 
+abstract class DownloadFileTask : DefaultTask() {
+    @get:Input
+    abstract val sourceUrl: Property<String>
+
+    @get:OutputFile
+    abstract val outputFile: RegularFileProperty
+
+    @TaskAction
+    fun download() {
+        val output = outputFile.get().asFile
+        output.parentFile.mkdirs()
+        URI(sourceUrl.get())
+            .toURL()
+            .openStream()
+            .use { input ->
+                output.outputStream().use { outputStream ->
+                    input.copyTo(outputStream)
+                }
+            }
+    }
+}
+
+abstract class ExtractZipEntryTask : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val zipFile: RegularFileProperty
+
+    @get:Input
+    abstract val entrySuffix: Property<String>
+
+    @get:OutputFile
+    abstract val outputFile: RegularFileProperty
+
+    @TaskAction
+    fun extract() {
+        val zip = zipFile.get().asFile
+        val output = outputFile.get().asFile
+        output.parentFile.mkdirs()
+
+        ZipFile(zip).use { archive ->
+            val entry = archive.entries().asSequence()
+                .firstOrNull { it.name.endsWith(entrySuffix.get()) }
+                ?: error("${entrySuffix.get()} entry was not found in ${zip.absolutePath}")
+
+            archive.getInputStream(entry).use { input ->
+                output.outputStream().use { outputStream ->
+                    input.copyTo(outputStream)
+                }
+            }
+        }
+    }
+}
+
 val defaultOlcRtcRepo = rootProject.layout.projectDirectory.asFile.parentFile
     .resolve("olcrtc")
     .absolutePath
@@ -28,7 +91,7 @@ val hevSocks5TunnelSourceDir = rootProject.layout.projectDirectory.dir("androidA
 val currentBuildOs = OperatingSystem.current()
 val desktopPackageName = "Olcbox"
 val desktopPackageVersion = providers.gradleProperty("olcbox.version").orElse("1.0.0").get()
-val WINTUN_VERSION = "0.14.1"
+val wintunVersion = "0.14.1"
 val currentBuildTargetFormats = when {
     currentBuildOs.isMacOsX -> arrayOf(TargetFormat.Dmg)
     currentBuildOs.isWindows -> arrayOf(TargetFormat.Exe, TargetFormat.Msi)
@@ -43,6 +106,21 @@ fun desktopArchName(arch: String): String = when (arch.lowercase()) {
 }
 
 fun shellQuote(value: String): String = "'${value.replace("'", "'\"'\"'")}'"
+
+fun windowsMsysBashPath(): String {
+    System.getenv("MSYS2_BASH")?.takeIf { it.isNotBlank() }?.let { return it }
+
+    val candidates = buildList {
+        System.getenv("RUNNER_TEMP")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { add("$it\\setup-msys2\\msys64\\usr\\bin\\bash.exe") }
+        add("C:\\msys64\\usr\\bin\\bash.exe")
+        add("D:\\a\\_temp\\setup-msys2\\msys64\\usr\\bin\\bash.exe")
+    }
+
+    return candidates.firstOrNull { File(it).isFile }
+        ?: candidates.first()
+}
 
 val hostDesktopArch = desktopArchName(System.getProperty("os.arch"))
 
@@ -260,7 +338,7 @@ if (currentBuildOs.isWindows) {
         outputs.files(hevSocks5TunnelWindowsOutput, msysRuntimeWindowsOutput)
         workingDir = rootProject.layout.projectDirectory.asFile
         commandLine(
-            "bash",
+            windowsMsysBashPath(),
             "-lc",
             """
             set -eu
@@ -283,42 +361,21 @@ if (currentBuildOs.isWindows) {
         )
     }
 
-    val downloadWintunWindowsAmd64 = tasks.register("downloadWintunWindowsAmd64") {
-        val zipFile = layout.buildDirectory.file("tmp/wintun/wintun-$WINTUN_VERSION.zip")
-        outputs.file(wintunWindowsOutput)
+    val downloadWintunWindowsAmd64 = tasks.register<DownloadFileTask>("downloadWintunWindowsAmd64") {
+        sourceUrl.set("https://www.wintun.net/builds/wintun-$wintunVersion.zip")
+        outputFile.set(layout.buildDirectory.file("tmp/wintun/wintun-$wintunVersion.zip"))
+    }
 
-        doLast {
-            val zip = zipFile.get().asFile
-            val output = wintunWindowsOutput.get().asFile
-            zip.parentFile.mkdirs()
-            output.parentFile.mkdirs()
-
-            URI("https://www.wintun.net/builds/wintun-$WINTUN_VERSION.zip")
-                .toURL()
-                .openStream()
-                .use { input ->
-                    zip.outputStream().use { outputStream ->
-                        input.copyTo(outputStream)
-                    }
-                }
-
-            ZipFile(zip).use { archive ->
-                val entry = archive.entries().asSequence()
-                    .firstOrNull { it.name.endsWith("/bin/amd64/wintun.dll") }
-                    ?: error("wintun.dll amd64 entry was not found in ${zip.absolutePath}")
-                archive.getInputStream(entry).use { input ->
-                    output.outputStream().use { outputStream ->
-                        input.copyTo(outputStream)
-                    }
-                }
-            }
-        }
+    val extractWintunWindowsAmd64 = tasks.register<ExtractZipEntryTask>("extractWintunWindowsAmd64") {
+        zipFile.set(downloadWintunWindowsAmd64.flatMap { it.outputFile })
+        entrySuffix.set("/bin/amd64/wintun.dll")
+        outputFile.set(wintunWindowsOutput)
     }
 
     desktopNativeAssetTasks.add(buildHevSocks5TunnelWindows)
-    desktopNativeAssetTasks.add(downloadWintunWindowsAmd64)
+    desktopNativeAssetTasks.add(extractWintunWindowsAmd64)
     hostDesktopNativeAssetTasks.add(buildHevSocks5TunnelWindows)
-    hostDesktopNativeAssetTasks.add(downloadWintunWindowsAmd64)
+    hostDesktopNativeAssetTasks.add(extractWintunWindowsAmd64)
 }
 
 tasks.register("buildDesktopNativeAssets") {
