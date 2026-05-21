@@ -132,6 +132,16 @@ fun desktopArchName(arch: String): String = when (arch.lowercase()) {
 
 fun shellQuote(value: String): String = "'${value.replace("'", "'\"'\"'")}'"
 
+fun windowsPathToMsysPath(path: String): String {
+    val normalized = path.replace('\\', '/')
+    val driveMatch = Regex("^([A-Za-z]):/(.*)$").matchEntire(normalized)
+    return if (driveMatch != null) {
+        "/${driveMatch.groupValues[1].lowercase()}/${driveMatch.groupValues[2]}"
+    } else {
+        normalized
+    }
+}
+
 fun windowsMsysCommand(script: String): List<String> {
     val bash = System.getenv("MSYS2_BASH")?.takeIf { it.isNotBlank() }
         ?: windowsMsysBashPath()
@@ -366,13 +376,10 @@ if (currentBuildOs.isWindows) {
             windowsMsysCommand(
             """
             set -eu
-            source_dir=${shellQuote(hevSocks5TunnelSourceDir.asFile.absolutePath)}
-            output_file=${shellQuote(hevSocks5TunnelWindowsOutput.get().asFile.absolutePath)}
-            msys_runtime=${shellQuote(msysRuntimeWindowsOutput.get().asFile.absolutePath)}
-            source_dir="${'$'}(cygpath -u "${'$'}source_dir")"
-            output_file="${'$'}(cygpath -u "${'$'}output_file")"
-            msys_runtime="${'$'}(cygpath -u "${'$'}msys_runtime")"
-            mkdir -p "${'$'}(dirname "${'$'}output_file")"
+            source_dir=${shellQuote(windowsPathToMsysPath(hevSocks5TunnelSourceDir.asFile.absolutePath))}
+            output_file=${shellQuote(windowsPathToMsysPath(hevSocks5TunnelWindowsOutput.get().asFile.absolutePath))}
+            msys_runtime=${shellQuote(windowsPathToMsysPath(msysRuntimeWindowsOutput.get().asFile.absolutePath))}
+            mkdir -p "${'$'}{output_file%/*}"
             cd "${'$'}source_dir"
             make clean exec
             if [ -f bin/hev-socks5-tunnel.exe ]; then
