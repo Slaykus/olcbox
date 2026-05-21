@@ -26,6 +26,6 @@ object OlcboxVpnState {
         _logs.update { (it + msg).takeLast(MAX_LOG_ENTRIES) }
     }
 
-    private const val MAX_LOG_ENTRIES = 5_000
+    private const val MAX_LOG_ENTRIES = 1_000
     private const val TAG = "OlcboxVpnService"
 }

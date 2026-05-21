@@ -85,6 +85,9 @@ class OlcboxVpnService : VpnService() {
     private var startupJob: Job? = null
     private var watchdogJob: Job? = null
     private var cleanupJob: Job? = null
+    private var networkLossJob: Job? = null
+    private var recoveryJob: Job? = null
+    private var reconnectAttempt = 0
     private var generation = 0L
     private var recoveryRequestedForGeneration = 0L
     private var watchdogTunStats: Tun2SocksStats? = null
@@ -111,6 +114,7 @@ class OlcboxVpnService : VpnService() {
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var connectivityManager: ConnectivityManager
     private var currentNetwork: Network? = null
+    private var currentNetworkTransport: UpstreamTransport? = null
     private var isCallbackRegistered = false
     private var connectionMode = AndroidConnectionMode.Tun
     private var socksListenPort = AndroidSocksProxySettings.DEFAULT_PORT
@@ -145,18 +149,24 @@ class OlcboxVpnService : VpnService() {
 
         override fun onLost(network: Network) {
             addLog("Network lost")
-            if (network == currentNetwork) {
-                updateUnderlyingNetwork(null)
-                unbindProcessFromNetwork()
-            }
-            scope.launch {
-                delay(NETWORK_LOSS_FALLBACK_DELAY_MS)
+            if (network != currentNetwork) return
+
+            networkLossJob?.cancel()
+            networkLossJob = scope.launch {
+                delay(NETWORK_LOSS_GRACE_MS)
+                if (network != currentNetwork) return@launch
+
                 val upstream = findActiveUpstreamNetwork()
                 if (upstream != null) {
                     handleNetworkChange(upstream, "Fallback")
-                } else if (OlcboxVpnState.status.value is VpnStatus.Connected ||
+                    return@launch
+                }
+
+                if (OlcboxVpnState.status.value is VpnStatus.Connected ||
                     OlcboxVpnState.status.value is VpnStatus.Reconnecting
                 ) {
+                    updateUnderlyingNetwork(null)
+                    unbindProcessFromNetwork()
                     setStatus(VpnStatus.Reconnecting)
                     updateNotification("Waiting for network...")
                     addLog("Waiting for upstream network")
@@ -173,6 +183,7 @@ class OlcboxVpnService : VpnService() {
         private fun handleNetworkChange(network: Network, reason: String) {
             val caps = connectivityManager.getNetworkCapabilities(network) ?: return
             if (!caps.isUsableUpstream()) return
+            networkLossJob?.cancel()
 
             val upstream = findActiveUpstreamNetwork() ?: return
             if (currentNetwork == upstream) {
@@ -180,17 +191,50 @@ class OlcboxVpnService : VpnService() {
                     startupJob?.isActive != true
                 ) {
                     addLog("Network $reason: ${getNetName(upstream)}")
-                    startTunnel(isMigration = true)
+                    requestTransportRecovery(
+                        reason = "Network available",
+                        fullRestart = false,
+                        delayMs = NETWORK_STABILITY_GRACE_MS
+                    )
                 }
                 return
             }
 
+            val previousTransport = currentNetworkTransport
+            val nextTransport = upstream.transportOrNull()
             updateUnderlyingNetwork(upstream)
             addLog("Network $reason: ${getNetName(upstream)}")
 
             when (OlcboxVpnState.status.value) {
-                is VpnStatus.Connected,
-                is VpnStatus.Reconnecting -> startTunnel(isMigration = true)
+                is VpnStatus.Connected -> {
+                    if (isBenignWifiRefresh(previousTransport, nextTransport)) {
+                        addLog("Keeping transport on refreshed Wi-Fi network")
+                    } else {
+                        requestTransportRecovery(
+                            reason = "Upstream network changed",
+                            fullRestart = false,
+                            delayMs = NETWORK_STABILITY_GRACE_MS,
+                            setReconnectingImmediately = false
+                        )
+                    }
+                }
+
+                is VpnStatus.Reconnecting -> {
+                    if (isBenignWifiRefresh(previousTransport, nextTransport) &&
+                        Mobile.isRunning() &&
+                        canReconnectTransportInPlace()
+                    ) {
+                        setStatus(VpnStatus.Connected)
+                        updateNotification(connectedNotificationText())
+                        startWatchdog()
+                    } else {
+                        requestTransportRecovery(
+                            reason = "Upstream network changed",
+                            fullRestart = false,
+                            delayMs = NETWORK_STABILITY_GRACE_MS
+                        )
+                    }
+                }
 
                 else -> Unit
             }
@@ -235,7 +279,6 @@ class OlcboxVpnService : VpnService() {
                 "Protecting your connection"
             }
         )
-        refreshWakeLock(force = true)
         startTunnel(isMigration = false, isRestart = isRestart)
         return START_REDELIVER_INTENT
     }
@@ -342,48 +385,58 @@ class OlcboxVpnService : VpnService() {
     ) {
         startupJob?.cancel()
         watchdogJob?.cancel()
+        networkLossJob?.cancel()
+        recoveryJob?.cancel()
+        recoveryJob = null
         if (!isMigration) {
-            recoveryRequestedForGeneration = 0L
+            resetRecoveryState()
         }
         val requestedGeneration = ++generation
+        refreshWakeLock(force = true)
 
         startupJob = scope.launch {
-            cleanupJob?.takeIf { it.isActive }?.let {
-                addLog("Waiting for previous olcRTC cleanup")
-                val completed = withTimeoutOrNull(PREVIOUS_STOP_WAIT_MS) {
-                    it.join()
-                    true
-                } ?: false
+            try {
+                cleanupJob?.takeIf { it.isActive }?.let {
+                    addLog("Waiting for previous olcRTC cleanup")
+                    val completed = withTimeoutOrNull(PREVIOUS_STOP_WAIT_MS) {
+                        it.join()
+                        true
+                    } ?: false
 
-                if (!completed) {
-                    addLog("Previous olcRTC cleanup is still pending; forcing transport cleanup")
-                    it.cancel()
-                    stopTransportProcesses(closeTun = true, waitForSocksPort = false)
-                }
-            }
-
-            if (!isMigration) {
-                registerNetworkMonitor()
-                updateUnderlyingNetwork(findActiveUpstreamNetwork())
-            }
-
-            tunnelMutex.withLock {
-                coroutineContext.ensureActive()
-                if (requestedGeneration != generation) return@withLock
-
-                val active = repository.getActiveLocation()
-                val location = active?.location?.normalized()
-                if (location == null || !location.isComplete()) {
-                    setStatus(VpnStatus.Error("No active location"))
-                    updateNotification("Add a location first")
-                    stopTransportProcesses(closeTun = true, waitForSocksPort = false)
-                    return@withLock
+                    if (!completed) {
+                        addLog("Previous olcRTC cleanup is still pending; forcing transport cleanup")
+                        it.cancel()
+                        stopTransportProcesses(closeTun = true, waitForSocksPort = false)
+                    }
                 }
 
-                if (isMigration && !forceFullRestart && canReconnectTransportInPlace()) {
-                    reconnectTransport(location, requestedGeneration)
-                } else {
-                    startFullTunnel(location, requestedGeneration, isMigration, isRestart)
+                if (!isMigration) {
+                    registerNetworkMonitor()
+                    updateUnderlyingNetwork(findActiveUpstreamNetwork())
+                }
+
+                tunnelMutex.withLock {
+                    coroutineContext.ensureActive()
+                    if (requestedGeneration != generation) return@withLock
+
+                    val active = repository.getActiveLocation()
+                    val location = active?.location?.normalized()
+                    if (location == null || !location.isComplete()) {
+                        setStatus(VpnStatus.Error("No active location"))
+                        updateNotification("Add a location first")
+                        stopTransportProcesses(closeTun = true, waitForSocksPort = false)
+                        return@withLock
+                    }
+
+                    if (isMigration && !forceFullRestart && canReconnectTransportInPlace()) {
+                        reconnectTransport(location, requestedGeneration)
+                    } else {
+                        startFullTunnel(location, requestedGeneration, isMigration, isRestart)
+                    }
+                }
+            } finally {
+                if (requestedGeneration == generation) {
+                    releaseWakeLock()
                 }
             }
         }
@@ -398,6 +451,7 @@ class OlcboxVpnService : VpnService() {
             unbindProcessFromNetwork()
             updateNotification("Waiting for network...")
             addLog("No upstream network; keeping tunnel alive")
+            scheduleTransportRetry(requestedGeneration, "no upstream network", NETWORK_RETRY_BASE_DELAY_MS)
             return
         }
 
@@ -408,7 +462,7 @@ class OlcboxVpnService : VpnService() {
 
         if (startMobile(location, upstream, requestedGeneration, setErrorOnFailure = false)) {
             setStatus(VpnStatus.Connected)
-            recoveryRequestedForGeneration = 0L
+            resetRecoveryState()
             updateNotification(connectedNotificationText())
             addLog("${activeModeLabel()} transport reconnected")
             startWatchdog()
@@ -416,7 +470,7 @@ class OlcboxVpnService : VpnService() {
             updateUnderlyingNetwork(null)
             setStatus(VpnStatus.Reconnecting)
             updateNotification("Waiting for transport...")
-            scheduleTransportRetry(requestedGeneration, "transport reconnect failed", RECONNECT_RETRY_DELAY_MS)
+            scheduleTransportRetry(requestedGeneration, "transport reconnect failed")
         }
     }
 
@@ -440,7 +494,7 @@ class OlcboxVpnService : VpnService() {
             setStatus(VpnStatus.Reconnecting)
             updateNotification("Waiting for network...")
             if (isMigration) {
-                scheduleTransportRetry(requestedGeneration, "no upstream network", NETWORK_RETRY_DELAY_MS)
+                scheduleTransportRetry(requestedGeneration, "no upstream network", NETWORK_RETRY_BASE_DELAY_MS)
             }
             return
         }
@@ -451,7 +505,7 @@ class OlcboxVpnService : VpnService() {
                 updateUnderlyingNetwork(null)
                 setStatus(VpnStatus.Reconnecting)
                 updateNotification("Waiting for transport...")
-                scheduleTransportRetry(requestedGeneration, "transport start failed", RECONNECT_RETRY_DELAY_MS)
+                scheduleTransportRetry(requestedGeneration, "transport start failed")
             }
             return
         }
@@ -465,7 +519,7 @@ class OlcboxVpnService : VpnService() {
 //                return
 //            }
             setStatus(VpnStatus.Connected)
-            recoveryRequestedForGeneration = 0L
+            resetRecoveryState()
             updateNotification(connectedNotificationText())
             addLog("Proxy mode connected on SOCKS ${AndroidSocksProxySettings.DEFAULT_HOST}:$socksListenPort")
             startWatchdog()
@@ -491,7 +545,7 @@ class OlcboxVpnService : VpnService() {
         if (requestedGeneration != generation) return
 
         setStatus(VpnStatus.Connected)
-        recoveryRequestedForGeneration = 0L
+        resetRecoveryState()
         updateNotification(connectedNotificationText())
         addLog("VPN tunnel established")
         startWatchdog()
@@ -767,7 +821,6 @@ class OlcboxVpnService : VpnService() {
         watchdogJob = scope.launch {
             while (isActive && OlcboxVpnState.status.value is VpnStatus.Connected) {
                 delay(WATCHDOG_INTERVAL_MS)
-                refreshWakeLock()
                 when {
                     !Mobile.isRunning() -> {
                         addLog("Watchdog: olcRTC stopped")
@@ -796,7 +849,13 @@ class OlcboxVpnService : VpnService() {
                 }
 
                 if (currentNetwork != upstream) {
+                    val previousTransport = currentNetworkTransport
+                    val nextTransport = upstream.transportOrNull()
                     updateUnderlyingNetwork(upstream)
+                    if (isBenignWifiRefresh(previousTransport, nextTransport)) {
+                        addLog("Watchdog: refreshed Wi-Fi upstream")
+                        continue
+                    }
                     addLog("Watchdog: upstream changed to ${getNetName(upstream)}")
                     requestTransportRecovery("Upstream network changed", fullRestart = false)
                     return@launch
@@ -830,8 +889,10 @@ class OlcboxVpnService : VpnService() {
         setStatus(VpnStatus.Stopping)
         startupJob?.cancel()
         watchdogJob?.cancel()
-        wakeLock?.let { if (it.isHeld) it.release() }
-        lastWakeLockRefreshAtMs = 0L
+        networkLossJob?.cancel()
+        recoveryJob?.cancel()
+        recoveryJob = null
+        releaseWakeLock()
 
         if (isCallbackRegistered) {
             runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
@@ -850,7 +911,7 @@ class OlcboxVpnService : VpnService() {
                 }
 
                 stopMobileAndWait()
-                recoveryRequestedForGeneration = 0L
+                resetRecoveryState()
             } finally {
                 if (stopService && generation == cleanupGeneration) stopSelf()
             }
@@ -1077,17 +1138,47 @@ class OlcboxVpnService : VpnService() {
         }.getOrNull()
     }
 
-    private fun requestTransportRecovery(reason: String, fullRestart: Boolean) {
-        if (OlcboxVpnState.status.value !is VpnStatus.Connected) return
+    private fun requestTransportRecovery(
+        reason: String,
+        fullRestart: Boolean,
+        delayMs: Long = 0L,
+        setReconnectingImmediately: Boolean = true
+    ) {
+        val status = OlcboxVpnState.status.value
+        if (status !is VpnStatus.Connected && status !is VpnStatus.Reconnecting) return
 
         val recoveryGeneration = generation
-        if (recoveryRequestedForGeneration == recoveryGeneration) return
+        if (delayMs <= 0L &&
+            recoveryRequestedForGeneration == recoveryGeneration &&
+            recoveryJob?.isActive == true
+        ) {
+            return
+        }
 
-        recoveryRequestedForGeneration = recoveryGeneration
-        setStatus(VpnStatus.Reconnecting)
-        updateNotification("Reconnecting...")
-        addLog("$reason; reconnecting transport")
-        startTunnel(isMigration = true, forceFullRestart = fullRestart)
+        recoveryJob?.cancel()
+        if (setReconnectingImmediately && status is VpnStatus.Connected) {
+            setStatus(VpnStatus.Reconnecting)
+            updateNotification("Reconnecting...")
+        }
+
+        recoveryJob = scope.launch {
+            if (delayMs > 0L) delay(delayMs)
+            if (generation != recoveryGeneration) return@launch
+            val currentStatus = OlcboxVpnState.status.value
+            if (currentStatus !is VpnStatus.Connected && currentStatus !is VpnStatus.Reconnecting) {
+                return@launch
+            }
+
+            recoveryRequestedForGeneration = recoveryGeneration
+            if (setReconnectingImmediately && currentStatus is VpnStatus.Connected) {
+                setStatus(VpnStatus.Reconnecting)
+                updateNotification("Reconnecting...")
+            }
+
+            addLog("$reason; reconnecting transport")
+            recoveryJob = null
+            startTunnel(isMigration = true, forceFullRestart = fullRestart)
+        }
     }
 
     private fun refreshWakeLock(force: Boolean = false) {
@@ -1108,19 +1199,44 @@ class OlcboxVpnService : VpnService() {
         }
     }
 
+    private fun releaseWakeLock() {
+        runCatching {
+            wakeLock?.let { if (it.isHeld) it.release() }
+        }.onFailure {
+            Log.w(TAG, "Failed to release VPN wake lock", it)
+        }
+        lastWakeLockRefreshAtMs = 0L
+    }
+
     private fun scheduleTransportRetry(
         requestedGeneration: Long,
         reason: String,
-        delayMs: Long
+        baseDelayMs: Long = RECONNECT_RETRY_BASE_DELAY_MS
     ) {
-        scope.launch {
+        val delayMs = nextReconnectRetryDelay(baseDelayMs)
+        recoveryJob?.cancel()
+        recoveryJob = scope.launch {
+            addLog("Retrying transport after $reason in ${delayMs / 1_000}s")
             delay(delayMs)
             if (generation != requestedGeneration) return@launch
             if (OlcboxVpnState.status.value !is VpnStatus.Reconnecting) return@launch
 
-            addLog("Retrying transport after $reason")
+            recoveryJob = null
             startTunnel(isMigration = true)
         }
+    }
+
+    private fun nextReconnectRetryDelay(baseDelayMs: Long): Long {
+        val multiplier = 1L shl reconnectAttempt.coerceAtMost(MAX_RECONNECT_BACKOFF_POWER)
+        reconnectAttempt++
+        return (baseDelayMs * multiplier).coerceAtMost(RECONNECT_RETRY_MAX_DELAY_MS)
+    }
+
+    private fun resetRecoveryState() {
+        recoveryRequestedForGeneration = 0L
+        reconnectAttempt = 0
+        recoveryJob?.cancel()
+        recoveryJob = null
     }
 
     private fun shouldRecreateTunnelOnRtcLoss(): Boolean {
@@ -1206,9 +1322,24 @@ class OlcboxVpnService : VpnService() {
 
     private fun updateUnderlyingNetwork(network: Network?) {
         currentNetwork = network
+        currentNetworkTransport = network?.transportOrNull()
         if (connectionMode == AndroidConnectionMode.Tun || vpnInterface != null) {
             setUnderlyingNetworks(if (network != null) arrayOf(network) else null)
         }
+    }
+
+    private fun Network.transportOrNull(): UpstreamTransport? {
+        val caps = connectivityManager.getNetworkCapabilities(this) ?: return null
+        if (!caps.isUsableUpstream()) return null
+        return caps.upstreamTransport()
+    }
+
+    private fun isBenignWifiRefresh(
+        previousTransport: UpstreamTransport?,
+        nextTransport: UpstreamTransport?
+    ): Boolean {
+        return previousTransport == UpstreamTransport.Wifi &&
+            nextTransport == UpstreamTransport.Wifi
     }
 
     private fun bindProcessToNetwork(network: Network?, successLog: String? = null) {
@@ -1503,8 +1634,9 @@ class OlcboxVpnService : VpnService() {
         private const val JITSI_RESTART_SETTLE_MS = 2_000L
         private const val TUN2SOCKS_STOP_WAIT_MS = 1_000L
         private const val TUNNEL_HANDOFF_DELAY_MS = 300L
-        private const val NETWORK_LOSS_FALLBACK_DELAY_MS = 300L
-        private const val WATCHDOG_INTERVAL_MS = 5_000L
+        private const val NETWORK_LOSS_GRACE_MS = 2_500L
+        private const val NETWORK_STABILITY_GRACE_MS = 1_500L
+        private const val WATCHDOG_INTERVAL_MS = 15_000L
         private const val WATCHDOG_STALLED_TX_PACKET_DELTA = 8L
         private const val WATCHDOG_STALLED_SAMPLE_LIMIT = 3
         private const val RTC_RECOVERY_GRACE_MS = 2_500L
@@ -1512,14 +1644,16 @@ class OlcboxVpnService : VpnService() {
         private const val RTC_FAILED_RECOVERY_THRESHOLD = 1
         private const val RTC_CLOSED_RECOVERY_THRESHOLD = 2
         private const val RTC_IO_ERROR_RECOVERY_THRESHOLD = 3
-        private const val RECONNECT_RETRY_DELAY_MS = 4_000L
-        private const val NETWORK_RETRY_DELAY_MS = 8_000L
+        private const val RECONNECT_RETRY_BASE_DELAY_MS = 4_000L
+        private const val NETWORK_RETRY_BASE_DELAY_MS = 8_000L
+        private const val RECONNECT_RETRY_MAX_DELAY_MS = 30_000L
+        private const val MAX_RECONNECT_BACKOFF_POWER = 3
         private const val SOCKS_RELEASE_TIMEOUT_MS = 2_500L
         private const val SOCKS_RELEASE_QUICK_TIMEOUT_MS = 500L
         private const val SOCKS_RELEASE_POLL_MS = 100L
         private const val SOCKET_CONNECT_TIMEOUT_MS = 150
-        private const val WAKE_LOCK_REFRESH_INTERVAL_MS = 60 * 60 * 1000L
-        private const val WAKE_LOCK_TIMEOUT_MS = 24 * 60 * 60 * 1000L
+        private const val WAKE_LOCK_REFRESH_INTERVAL_MS = 30_000L
+        private const val WAKE_LOCK_TIMEOUT_MS = 2 * 60 * 1000L
         private const val TUN_MTU = 1500
         private const val TUN_IPV4_ADDRESS = "10.0.88.88"
         private const val IPV4_PREFIX_LENGTH = 24

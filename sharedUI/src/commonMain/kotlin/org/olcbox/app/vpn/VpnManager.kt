@@ -2,6 +2,7 @@ package org.olcbox.app.vpn
 
 import kotlinx.coroutines.flow.StateFlow
 import org.olcbox.app.data.model.LocationConfig
+import org.olcbox.app.data.repository.SubscriptionFetchProxy
 
 sealed class VpnStatus {
     object Disconnected : VpnStatus()
@@ -21,4 +22,5 @@ interface VpnManager {
     fun stopVpn()
     suspend fun ping(locationConfig: LocationConfig): Long?
     suspend fun checkConnection(locationConfig: LocationConfig): Long?
+    fun subscriptionFetchProxy(): SubscriptionFetchProxy? = null
 }

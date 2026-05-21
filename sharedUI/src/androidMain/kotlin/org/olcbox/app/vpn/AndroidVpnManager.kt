@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import org.olcbox.app.data.model.LocationConfig
 import org.olcbox.app.data.datasource.LocationsDataSourceImpl
 import org.olcbox.app.data.identity.PersistentDeviceIdentityProvider
+import org.olcbox.app.data.repository.SubscriptionFetchProxy
 import org.olcbox.app.vpn.data.KEY_ANDROID_CONNECTION_MODE
 import org.olcbox.app.vpn.data.KEY_ANDROID_DYNAMIC_THEME
 import org.olcbox.app.vpn.data.KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS
@@ -239,6 +240,23 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
         return OlcRtcConnectionChecker.check(
             locationConfig = locationConfig,
             deviceId = deviceIdentityProvider.hwid()
+        )
+    }
+
+    override fun subscriptionFetchProxy(): SubscriptionFetchProxy? {
+        val currentStatus = status.value
+        if (currentStatus !is VpnStatus.Connected &&
+            currentStatus !is VpnStatus.Reconnecting
+        ) {
+            return null
+        }
+
+        val proxy = _proxySettings.value
+        return SubscriptionFetchProxy(
+            host = proxy.host,
+            port = proxy.port,
+            username = proxy.username,
+            password = proxy.password
         )
     }
 

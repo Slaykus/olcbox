@@ -258,7 +258,10 @@ class HomeScreenViewModel(
         viewModelScope.launch {
             try {
                 val imported = withContext(Dispatchers.IO) {
-                    locationsRepository.importText(rawText)
+                    locationsRepository.importText(
+                        text = rawText,
+                        subscriptionProxy = vpnManager.subscriptionFetchProxy()
+                    )
                 }
                 if (!imported) {
                     onError("No valid Olcbox config found")
@@ -283,7 +286,9 @@ class HomeScreenViewModel(
         onComplete: (updatedCount: Int) -> Unit = {}
     ) {
         viewModelScope.launch {
-            val updatedCount = locationsRepository.refreshSubscriptions()
+            val updatedCount = locationsRepository.refreshSubscriptions(
+                subscriptionProxy = vpnManager.subscriptionFetchProxy()
+            )
             loadCurrentConfigNow()
             onComplete(updatedCount)
         }
@@ -294,7 +299,10 @@ class HomeScreenViewModel(
         onComplete: (updatedCount: Int) -> Unit = {}
     ) {
         viewModelScope.launch {
-            val updatedCount = locationsRepository.refreshSubscription(subscriptionUrl)
+            val updatedCount = locationsRepository.refreshSubscription(
+                subscriptionUrl = subscriptionUrl,
+                subscriptionProxy = vpnManager.subscriptionFetchProxy()
+            )
             loadCurrentConfigNow()
             onComplete(updatedCount)
         }
@@ -312,7 +320,9 @@ class HomeScreenViewModel(
 
     private suspend fun refreshDueSubscriptionsIfNeeded() {
         val updatedCount = withContext(Dispatchers.IO) {
-            locationsRepository.refreshDueSubscriptions()
+            locationsRepository.refreshDueSubscriptions(
+                subscriptionProxy = vpnManager.subscriptionFetchProxy()
+            )
         }
         if (updatedCount > 0) {
             loadCurrentConfigNow()

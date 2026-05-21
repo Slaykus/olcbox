@@ -142,15 +142,11 @@ fun windowsMsysCmdPath(): String {
     System.getenv("MSYS2_CMD")?.takeIf { it.isNotBlank() }?.let { return it }
 
     val candidates = buildList {
-        System.getenv("RUNNER_TEMP")
-            ?.takeIf { it.isNotBlank() }
-            ?.let { add("$it\\setup-msys2\\msys2.cmd") }
-        add("D:\\a\\_temp\\setup-msys2\\msys2.cmd")
         add("C:\\msys64\\msys2_shell.cmd")
     }
 
     return candidates.firstOrNull { File(it).isFile }
-        ?: candidates.first()
+        ?: "msys2"
 }
 
 val hostDesktopArch = desktopArchName(System.getProperty("os.arch"))
@@ -387,9 +383,24 @@ if (currentBuildOs.isWindows) {
               install -m 0755 bin/hev-socks5-tunnel "${'$'}output_file"
             fi
             cp /usr/bin/msys-2.0.dll "${'$'}msys_runtime"
+            test -s "${'$'}output_file"
+            test -s "${'$'}msys_runtime"
+            ls -l "${'$'}output_file" "${'$'}msys_runtime"
             """.trimIndent()
             )
         )
+
+        doLast {
+            val missing = listOf(
+                hevSocks5TunnelWindowsOutput.get().asFile,
+                msysRuntimeWindowsOutput.get().asFile
+            ).filterNot { it.isFile && it.length() > 0L }
+
+            require(missing.isEmpty()) {
+                "buildHevSocks5TunnelWindows did not produce expected outputs:\n" +
+                        missing.joinToString(separator = "\n") { "- ${it.absolutePath}" }
+            }
+        }
     }
 
     val downloadWintunWindowsAmd64 = tasks.register<DownloadFileTask>("downloadWintunWindowsAmd64") {

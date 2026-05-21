@@ -19,6 +19,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.olcbox.app.data.model.LocationConfig
 import org.olcbox.app.data.repository.LocationsRepository
+import org.olcbox.app.data.repository.SubscriptionFetchProxy
 import org.olcbox.app.desktop.DesktopOs
 import org.olcbox.app.desktop.DesktopPaths
 import org.olcbox.app.vpn.desktop.DesktopNativeAssets
@@ -119,6 +120,23 @@ class DesktopVpnManager private constructor(
         return OlcRtcConnectionChecker.check(
             locationConfig = locationConfig,
             deviceId = locationsRepository.getDeviceIdentity()
+        )
+    }
+
+    override fun subscriptionFetchProxy(): SubscriptionFetchProxy? {
+        val currentStatus = status.value
+        if (currentStatus !is VpnStatus.Connected &&
+            currentStatus !is VpnStatus.Reconnecting
+        ) {
+            return null
+        }
+
+        val socks = _socksProxySettings.value.normalized()
+        return SubscriptionFetchProxy(
+            host = socks.host,
+            port = socks.port,
+            username = socks.username,
+            password = socks.password
         )
     }
 

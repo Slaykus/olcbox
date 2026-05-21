@@ -1,7 +1,6 @@
 package org.olcbox.app.data.datasource
 
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
 import io.ktor.client.statement.HttpResponse
@@ -30,6 +29,7 @@ import org.olcbox.app.data.model.LocationEntry
 import org.olcbox.app.data.model.LocationMetadata
 import org.olcbox.app.data.model.SubscriptionMetadata
 import org.olcbox.app.data.repository.LocationsRepository
+import org.olcbox.app.data.repository.SubscriptionFetchProxy
 
 interface LocationsDataSource {
     suspend fun loadLocationBundle(): LocationBundleV4?
@@ -40,17 +40,12 @@ interface LocationsDataSource {
     suspend fun saveDeviceIdentity(value: String) = Unit
 }
 
-private fun createLocationsHttpClient(): HttpClient {
-    return HttpClient {
-        expectSuccess = false
+internal expect fun createLocationsHttpClient(subscriptionProxy: SubscriptionFetchProxy? = null): HttpClient
 
-        install(HttpTimeout) {
-            connectTimeoutMillis = 3_000
-            requestTimeoutMillis = 8_000
-            socketTimeoutMillis = 8_000
-        }
-    }
-}
+internal expect suspend fun <T> withSubscriptionProxyAuthentication(
+    subscriptionProxy: SubscriptionFetchProxy?,
+    block: suspend () -> T
+): T
 
 class LocationsRepositoryImpl(
     private val dataSource: LocationsDataSource,
@@ -139,8 +134,11 @@ class LocationsRepositoryImpl(
         return json.encodeToString(LocationBundleV4.serializer(), getBundle())
     }
 
-    override suspend fun importText(text: String): Boolean {
-        val resolved = resolveParsedImport(text) ?: return false
+    override suspend fun importText(text: String, subscriptionProxy: SubscriptionFetchProxy?): Boolean {
+        val resolved = resolveParsedImport(
+            text = text,
+            subscriptionProxy = subscriptionProxy
+        ) ?: return false
 
         mutationMutex.withLock {
             val merged = mergeImportedBundle(
@@ -153,21 +151,33 @@ class LocationsRepositoryImpl(
         return true
     }
 
-    override suspend fun refreshSubscriptions(): Int {
+    override suspend fun refreshSubscriptions(subscriptionProxy: SubscriptionFetchProxy?): Int {
         return mutationMutex.withLock {
-            refreshSubscriptionsUnlocked(onlyUrls = null)
+            refreshSubscriptionsUnlocked(
+                onlyUrls = null,
+                subscriptionProxy = subscriptionProxy
+            )
         }
     }
 
-    override suspend fun refreshSubscription(subscriptionUrl: String): Int {
+    override suspend fun refreshSubscription(
+        subscriptionUrl: String,
+        subscriptionProxy: SubscriptionFetchProxy?
+    ): Int {
         val normalizedUrl = subscriptionUrl.trim()
         if (normalizedUrl.isBlank()) return 0
         return mutationMutex.withLock {
-            refreshSubscriptionsUnlocked(onlyUrls = setOf(normalizedUrl))
+            refreshSubscriptionsUnlocked(
+                onlyUrls = setOf(normalizedUrl),
+                subscriptionProxy = subscriptionProxy
+            )
         }
     }
 
-    private suspend fun refreshSubscriptionsUnlocked(onlyUrls: Set<String>?): Int {
+    private suspend fun refreshSubscriptionsUnlocked(
+        onlyUrls: Set<String>?,
+        subscriptionProxy: SubscriptionFetchProxy?
+    ): Int {
         val bundle = getBundleUnlocked()
         if (bundle.locations.isEmpty()) return 0
 
@@ -201,7 +211,8 @@ class LocationsRepositoryImpl(
             val previousInterval = previousEntries.subscriptionUpdateIntervalHours()
             val resolved = resolveParsedImport(
                 text = url,
-                fallbackSubscriptionInterval = previousInterval
+                fallbackSubscriptionInterval = previousInterval,
+                subscriptionProxy = subscriptionProxy
             ) ?: run {
                 preservePreviousEntries(previousEntries)
                 return@forEach
@@ -263,7 +274,7 @@ class LocationsRepositoryImpl(
         return successfulRefreshes
     }
 
-    override suspend fun refreshDueSubscriptions(): Int {
+    override suspend fun refreshDueSubscriptions(subscriptionProxy: SubscriptionFetchProxy?): Int {
         return mutationMutex.withLock {
             val bundle = getBundleUnlocked()
             val now = nowEpochMs()
@@ -282,7 +293,10 @@ class LocationsRepositoryImpl(
             if (dueUrls.isEmpty()) {
                 0
             } else {
-                refreshSubscriptionsUnlocked(dueUrls)
+                refreshSubscriptionsUnlocked(
+                    onlyUrls = dueUrls,
+                    subscriptionProxy = subscriptionProxy
+                )
             }
         }
     }
@@ -385,14 +399,23 @@ class LocationsRepositoryImpl(
 
     private suspend fun resolveParsedImport(
         text: String,
-        fallbackSubscriptionInterval: Int? = null
+        fallbackSubscriptionInterval: Int? = null,
+        subscriptionProxy: SubscriptionFetchProxy? = null
     ): ResolvedImport? {
         val input = text.normalizedImportText()
         if (input.isBlank()) return null
 
-        var source = resolveImportSource(input, SubscriptionRequestMode.Identity) ?: run {
+        var source = resolveImportSource(
+            text = input,
+            requestMode = SubscriptionRequestMode.Identity,
+            subscriptionProxy = subscriptionProxy
+        ) ?: run {
             if (input.isHttpUrl()) {
-                resolveImportSource(input, SubscriptionRequestMode.Compatibility)
+                resolveImportSource(
+                    text = input,
+                    requestMode = SubscriptionRequestMode.Compatibility,
+                    subscriptionProxy = subscriptionProxy
+                )
             } else {
                 null
             }
@@ -400,7 +423,11 @@ class LocationsRepositoryImpl(
 
         var parsed = parseImportSource(source, fallbackSubscriptionInterval)
         if (parsed == null && input.isHttpUrl() && source.requestMode != SubscriptionRequestMode.Compatibility) {
-            val fallbackSource = resolveImportSource(input, SubscriptionRequestMode.Compatibility)
+            val fallbackSource = resolveImportSource(
+                text = input,
+                requestMode = SubscriptionRequestMode.Compatibility,
+                subscriptionProxy = subscriptionProxy
+            )
             if (fallbackSource != null) {
                 source = fallbackSource
                 parsed = parseImportSource(fallbackSource, fallbackSubscriptionInterval)
@@ -427,7 +454,8 @@ class LocationsRepositoryImpl(
 
     private suspend fun resolveImportSource(
         text: String,
-        requestMode: SubscriptionRequestMode
+        requestMode: SubscriptionRequestMode,
+        subscriptionProxy: SubscriptionFetchProxy?
     ): ImportSource? {
         if (text.isBlank()) return null
 
@@ -435,7 +463,11 @@ class LocationsRepositoryImpl(
             return ImportSource(content = text.normalizedImportText())
         }
 
-        val downloaded = downloadTextFromUrl(text, requestMode) ?: return null
+        val downloaded = downloadTextFromUrl(
+            url = text,
+            requestMode = requestMode,
+            subscriptionProxy = subscriptionProxy
+        ) ?: return null
         return downloaded.content
             .normalizedImportText()
             .takeIf { it.isNotBlank() }
@@ -451,47 +483,62 @@ class LocationsRepositoryImpl(
 
     private suspend fun downloadTextFromUrl(
         url: String,
-        requestMode: SubscriptionRequestMode
+        requestMode: SubscriptionRequestMode,
+        subscriptionProxy: SubscriptionFetchProxy?
     ): DownloadedSubscription? {
         val hwid = if (requestMode == SubscriptionRequestMode.Identity) {
             deviceIdentityProvider.hwid()
         } else {
             null
         }
-        val response = runCatching {
-            httpClient.get(url) {
-                headers {
-                    append(
-                        HttpHeaders.Accept,
-                        "text/plain, text/markdown, application/octet-stream, */*"
-                    )
-                    if (requestMode == SubscriptionRequestMode.Identity) {
-                        append(HttpHeaders.UserAgent, CurrentAppInfo.userAgent)
-                        append("x-hwid", hwid.orEmpty())
-                    } else {
-                        append(
-                            HttpHeaders.UserAgent,
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-                        )
-                    }
-                }
-            }
-        }.getOrNull() ?: return null
-
-        if (response.status.value !in 200..299) {
-            return null
+        val client = if (subscriptionProxy == null) {
+            httpClient
+        } else {
+            createLocationsHttpClient(subscriptionProxy)
         }
 
-        val content = runCatching {
-            response.bodyAsText()
-        }.getOrNull()?.takeIf { it.isNotBlank() }
-            ?: return null
+        return try {
+            withSubscriptionProxyAuthentication(subscriptionProxy) {
+                val response = runCatching {
+                    client.get(url) {
+                        headers {
+                            append(
+                                HttpHeaders.Accept,
+                                "text/plain, text/markdown, application/octet-stream, */*"
+                            )
+                            if (requestMode == SubscriptionRequestMode.Identity) {
+                                append(HttpHeaders.UserAgent, CurrentAppInfo.userAgent)
+                                append("x-hwid", hwid.orEmpty())
+                            } else {
+                                append(
+                                    HttpHeaders.UserAgent,
+                                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                                        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+                                )
+                            }
+                        }
+                    }
+                }.getOrNull() ?: return@withSubscriptionProxyAuthentication null
 
-        return DownloadedSubscription(
-            content = content,
-            updateIntervalHours = response.profileUpdateIntervalHours()
-        )
+                if (response.status.value !in 200..299) {
+                    return@withSubscriptionProxyAuthentication null
+                }
+
+                val content = runCatching {
+                    response.bodyAsText()
+                }.getOrNull()?.takeIf { it.isNotBlank() }
+                    ?: return@withSubscriptionProxyAuthentication null
+
+                DownloadedSubscription(
+                    content = content,
+                    updateIntervalHours = response.profileUpdateIntervalHours()
+                )
+            }
+        } finally {
+            if (subscriptionProxy != null) {
+                client.close()
+            }
+        }
     }
 
     private fun String.isHttpUrl(): Boolean {

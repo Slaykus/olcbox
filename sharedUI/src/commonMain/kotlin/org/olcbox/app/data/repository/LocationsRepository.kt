@@ -10,10 +10,13 @@ interface LocationsRepository {
     suspend fun getBundle(): LocationBundleV4
     suspend fun saveBundle(bundle: LocationBundleV4)
     suspend fun exportBundle(): String
-    suspend fun importText(text: String): Boolean
-    suspend fun refreshSubscriptions(): Int
-    suspend fun refreshSubscription(subscriptionUrl: String): Int
-    suspend fun refreshDueSubscriptions(): Int
+    suspend fun importText(text: String, subscriptionProxy: SubscriptionFetchProxy? = null): Boolean
+    suspend fun refreshSubscriptions(subscriptionProxy: SubscriptionFetchProxy? = null): Int
+    suspend fun refreshSubscription(
+        subscriptionUrl: String,
+        subscriptionProxy: SubscriptionFetchProxy? = null
+    ): Int
+    suspend fun refreshDueSubscriptions(subscriptionProxy: SubscriptionFetchProxy? = null): Int
     suspend fun setSubscriptionUpdateInterval(subscriptionUrl: String, hours: Int)
     suspend fun saveLocation(storageId: String, location: LocationConfig)
     suspend fun loadLocation(storageId: String): LocationConfig?
@@ -24,3 +27,10 @@ interface LocationsRepository {
     suspend fun getActiveLocation(): LocationEntry?
     suspend fun getDeviceIdentity(): String
 }
+
+data class SubscriptionFetchProxy(
+    val host: String,
+    val port: Int,
+    val username: String = "",
+    val password: String = ""
+)
