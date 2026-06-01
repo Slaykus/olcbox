@@ -1,3 +1,9 @@
+#Dev Environment
+.vscode
+logs
+build_docs
+.idea
+
 *.iml
 .gradle
 .idea
