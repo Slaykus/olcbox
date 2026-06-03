@@ -650,6 +650,7 @@ private fun SplitTunnelingAppListContent(
     onRussianBypassPresetEnabledChanged: (Boolean) -> Unit
 ) {
     var query by remember(list) { mutableStateOf("") }
+    var showSystemApps by remember(list) { mutableStateOf(false) }
 
     // Не просто scrollToItem(0): keyed LazyColumn может успеть сохранить старый visible key
     // и слегка увести список к элементу, который переехал. Для bulk/search-сценариев
@@ -702,24 +703,50 @@ private fun SplitTunnelingAppListContent(
             )
         }
     }
-    val filteredApps = remember(appListEntries, normalizedQuery, sortSelectedPackages, sortAutoBypassPackages) {
-        val apps = if (normalizedQuery.isBlank()) {
-            appListEntries
-        } else {
-            appListEntries.filter { entry ->
-                entry.labelSortKey.contains(normalizedQuery) ||
+    val systemAppsCount = remember(installedApps) {
+        installedApps.count { it.isSystem }
+    }
+    val filteredApps = remember(
+        appListEntries,
+        normalizedQuery,
+        selectedPackages,
+        showSystemApps,
+        sortSelectedPackages,
+        sortAutoBypassPackages
+    ) {
+        appListEntries
+            .asSequence()
+            .filter { entry ->
+                showSystemApps ||
+                        !entry.app.isSystem ||
+                        entry.app.packageName in selectedPackages
+            }
+            .filter { entry ->
+                normalizedQuery.isBlank() ||
+                        entry.labelSortKey.contains(normalizedQuery) ||
                         entry.packageSortKey.contains(normalizedQuery)
             }
+            .sortedWith(
+                compareBy<AndroidAppListEntry> {
+                    when (it.app.packageName) {
+                        in sortAutoBypassPackages -> 0
+                        in sortSelectedPackages -> 1
+                        else -> 2
+                    }
+                }.thenBy { it.labelSortKey }.thenBy { it.packageSortKey }
+            )
+            .map { it.app }
+            .toList()
+    }
+
+    fun showSystemAppsValue(): String {
+        return if (systemAppsCount == 0) {
+            "No system apps found"
+        } else if (showSystemApps) {
+            "${appCount(systemAppsCount)} included"
+        } else {
+            "${appCount(systemAppsCount)} hidden by default"
         }
-        apps.sortedWith(
-            compareBy<AndroidAppListEntry> {
-                when (it.app.packageName) {
-                    in sortAutoBypassPackages -> 0
-                    in sortSelectedPackages -> 1
-                    else -> 2
-                }
-            }.thenBy { it.labelSortKey }.thenBy { it.packageSortKey }
-        ).map { it.app }
     }
 
     LaunchedEffect(list, russianBypassPackages, autoBypassPackages, russianBypassPresetEnabled) {
@@ -776,6 +803,23 @@ private fun SplitTunnelingAppListContent(
             label = { Text("Search apps") },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
         )
+
+        if (systemAppsCount > 0) {
+            Spacer(Modifier.height(10.dp))
+
+            SettingsSwitchRow(
+                title = "Show system apps",
+                value = showSystemAppsValue(),
+                icon = Icons.Outlined.Settings,
+                checked = showSystemApps,
+                enabled = enabled,
+                onCheckedChange = { checked ->
+                    focusManager.clearFocus()
+                    showSystemApps = checked
+                    resetListScrollToTop()
+                }
+            )
+        }
 
         if (list == AndroidSplitTunnelList.Bypass) {
             Spacer(Modifier.height(10.dp))

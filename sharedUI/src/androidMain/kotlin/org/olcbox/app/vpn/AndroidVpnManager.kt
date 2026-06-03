@@ -2,6 +2,7 @@ package org.olcbox.app.vpn
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
@@ -309,18 +310,34 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
             @Suppress("DEPRECATION")
             packageManager.queryIntentActivities(launcherIntent, 0)
         }
-
-        resolveInfos
+        val launcherApps = resolveInfos
             .mapNotNull { it.activityInfo?.applicationInfo }
+
+        val installedApps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getInstalledApplications(
+                PackageManager.ApplicationInfoFlags.of(0)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getInstalledApplications(0)
+        }
+
+        (launcherApps + installedApps)
             .filter { it.packageName != appContext.packageName }
             .distinctBy { it.packageName }
             .map { appInfo ->
                 AndroidInstalledApp(
                     packageName = appInfo.packageName,
-                    label = appInfo.loadLabel(packageManager).toString()
+                    label = appInfo.loadLabel(packageManager).toString(),
+                    isSystem = appInfo.isSystemApp()
                 )
             }
             .sortedWith(compareBy<AndroidInstalledApp> { it.label.lowercase() }.thenBy { it.packageName })
+    }
+
+    private fun ApplicationInfo.isSystemApp(): Boolean {
+        val systemFlags = ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
+        return flags and systemFlags != 0
     }
 
     private fun generateProxyPassword(): String {

@@ -25,5 +25,6 @@ enum class AndroidSplitTunnelList {
 
 data class AndroidInstalledApp(
     val packageName: String,
-    val label: String
+    val label: String,
+    val isSystem: Boolean = false
 )
