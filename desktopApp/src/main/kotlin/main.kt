@@ -279,7 +279,12 @@ fun main(args: Array<String>) = application {
         visible = isWindowVisible,
         state = rememberWindowState(width = 430.dp, height = 780.dp),
         onCloseRequest = {
-            isWindowVisible = false
+            if (java.awt.SystemTray.isSupported()) {
+                isWindowVisible = false
+            } else {
+                dependencies.close()
+                exitApplication()
+            }
         },
     ) {
         window.minimumSize = Dimension(350, 600)
