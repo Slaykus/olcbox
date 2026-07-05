@@ -3,7 +3,7 @@ name: Build Olcbox Releases
 on:
   workflow_dispatch:
   push:
-    branches: [ main, universal-carrier ]
+    branches: [ universal-carrier ]
 
 permissions:
   contents: read
