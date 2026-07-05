@@ -93,6 +93,7 @@ jobs:
           path: olcbox/dist/olcbox-rain-debug.apk
 
       - name: Publish to rain-debug prerelease
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: rain-debug
