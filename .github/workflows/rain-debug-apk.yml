@@ -1,0 +1,102 @@
+name: Rain debug APK
+
+# Builds an unsigned DEBUG Android APK (auto-signed with the debug key, installable
+# on any phone — no keystore/secrets needed) and publishes it to a stable
+# "rain-debug" prerelease. Lets us test integration without a local toolchain.
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rain-debug-apk
+  cancel-in-progress: true
+
+jobs:
+  debug-apk:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_NDK_VERSION: "28.2.13676358"
+    steps:
+      - name: Checkout olcbox
+        uses: actions/checkout@v7
+        with:
+          path: olcbox
+
+      - name: Checkout olcrtc
+        uses: actions/checkout@v7
+        with:
+          repository: openlibrecommunity/olcrtc
+          ref: master
+          path: olcrtc
+          submodules: recursive
+
+      - name: Setup JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+          cache-dependency-path: olcrtc/go.sum
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install Go mobile tooling
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install github.com/magefile/mage@latest
+
+      - name: Initialize gomobile
+        working-directory: olcrtc
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}"
+          export ANDROID_NDK_ROOT="${ANDROID_NDK_HOME}"
+          gomobile init
+
+      - name: Build debug APK
+        working-directory: olcbox
+        run: |
+          export OLCRTC_REPO="${{ github.workspace }}/olcrtc"
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}"
+          export ANDROID_NDK_ROOT="${ANDROID_NDK_HOME}"
+          ./gradlew :androidApp:assembleDebug --stacktrace
+
+      - name: Collect APK
+        working-directory: olcbox
+        run: |
+          mkdir -p dist
+          apk="$(find androidApp/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' | sort | head -n 1)"
+          if [ -z "$apk" ]; then echo "debug APK not found" >&2; exit 1; fi
+          cp "$apk" "dist/olcbox-rain-debug.apk"
+          ls -la dist/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: olcbox-rain-debug-apk
+          path: olcbox/dist/olcbox-rain-debug.apk
+
+      - name: Publish to rain-debug prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: rain-debug
+          name: "Rain debug APK (latest main)"
+          prerelease: true
+          files: olcbox/dist/olcbox-rain-debug.apk
+          body: "Auto-built debug APK from the latest push to main. Install on Android (allow unknown sources)."
